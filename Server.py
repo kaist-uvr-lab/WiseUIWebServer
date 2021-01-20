@@ -14,7 +14,7 @@ import torch
 
 from superglue.matching import Matching
 from superglue.utils import (AverageTimer, VideoStreamer,
-                          make_matching_plot_fast, frame2tensor)
+                          make_matching_plot_fast, frame2tensor, keyframe2tensor)
 
 from matplotlib import gridspec
 from matplotlib import pyplot as plt
@@ -25,15 +25,22 @@ from matplotlib import pyplot as plt
 #cv2.namedWindow('detect', cv2.WINDOW_NORMAL)
 #cv2.resizeWindow('detect', (640,480))
 
+import random
+
 global data1, data2
 data1 = None
 data2 = None
 
+global FrameData
+FrameData = {}
+
 app = Flask(__name__)
-cors = CORS(app)
+#cors = CORS(app)
+#CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 @app.route("/api/detect", methods=['POST'])
 def detect():
     global data1, data2
+    global FrameData
     start = time.time()
     params = ujson.loads(request.data)
     img_encoded = base64.b64decode(params['img'])
@@ -42,6 +49,7 @@ def detect():
     width = int(params['w'])
     height = int(params['h'])
     channel = int(params['c'])
+    id = int(params['id'])
 
     # Convert PIL Image
     ######
@@ -52,10 +60,40 @@ def detect():
     img_cv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
     frame_tensor = frame2tensor(img_cv, device)
     last_data = matching.superpoint({'image': frame_tensor})
+
+    ####data 저장
+    temp = {}
+    temp['image'] = img_cv
+    kpts0 = last_data['keypoints'][0].cpu().detach().numpy()
+    temp['keypoints'] = kpts0#last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
+    temp['descriptors'] = last_data['descriptors'][0].cpu().detach().numpy()
+    temp['scores'] = last_data['scores'][0].cpu().detach().numpy()
+    FrameData[id] = temp
+    print("Data %d" %(len(FrameData)))
+    ####data 저장
+
+    """
     last_data = {k + type: last_data[k] for k in keys}
     last_data['image'+type] = frame_tensor
 
     kpts0 = last_data['keypoints'+type][0].cpu().numpy()
+
+    #keys = ['keypoints', 'scores', 'descriptors']
+    #CPU->GPU TEST
+    last_data['keypoints'+type] = torch.from_numpy(kpts0).float()[None].to(device)
+
+    #ID 부여한 것
+    last_data['id'] = id
+    """
+
+
+    """
+    print(type(last_data))
+    print(last_data.cpu())
+    print(len(last_data['keypoints'+type]))
+    print(type(last_data['keypoints'+type][0].cpu()))
+    """
+
     n = len(kpts0)
 
     #print("detect : %d" %(n))
@@ -76,25 +114,38 @@ def detect():
 
 @app.route("/api/match", methods=['POST'])
 def match():
-    global data1, data2
+    global FrameData
+    #global data1, data2
     start = time.time()
     #if data2 == None:
     #    json_data = ujson.dumps({'res': kpts0.tolist(), 'n': len(kpts0)})
     #    print('??????????????????????')
     #    return json_data
+
+    ##data 처리
+    params = ujson.loads(request.data)
+    id1 = int(params['id1'])
+    id2 = int(params['id2'])
+
+    ####data 불러오기
+    #tempdata1 = FrameData[id1]
+    #tempdata2 = FrameData[id2]
+    data1 = keyframe2tensor(FrameData[id1], device, '0')
+    data2 = keyframe2tensor(FrameData[id2], device, '1')
+
     pred = matching({**data1, **data2})
-    kpts0 = data1['keypoints0'][0].cpu().numpy()
-    kpts1 = data2['keypoints1'][0].cpu().numpy()
+    #kpts0 = data1['keypoints0'][0].cpu().numpy()
+    #kpts1 = data2['keypoints1'][0].cpu().numpy()
     matches = pred['matches0'][0].cpu().numpy()
     #confidence = pred['matching_scores0'][0].cpu().numpy()
 
-    valid = matches > -1
-    mkpts0 = kpts0[valid]
-    mkpts1 = kpts1[matches[valid]]
-    n1 = len(mkpts0)
-    n2 = len(mkpts1)
-    print("Time spent handling the request: %f, %d" % (time.time() - start, n1))
-    json_data = ujson.dumps({'res': matches.tolist(), 'n': n1})
+    #valid = matches > -1
+    #mkpts0 = kpts0[valid]
+    #mkpts1 = kpts1[matches[valid]]
+    #n1 = len(mkpts0)
+    #n2 = len(mkpts1)
+    print("Time spent handling the request: %f %d" % (time.time() - start, len(matches)))
+    json_data = ujson.dumps({'res': matches.tolist(), 'n': len(matches)})
     return json_data
 ##################################################
 # END API part
@@ -193,4 +244,4 @@ if __name__ == "__main__":
     keys = ['keypoints', 'scores', 'descriptors']
 
     print('Starting the API')
-    app.run(host='143.248.96.81', port = 35005)
+    app.run(host='127.0.0.1', port = 35005)
