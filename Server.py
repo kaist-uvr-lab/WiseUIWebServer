@@ -14,8 +14,7 @@ import argparse
 import torch
 
 from superglue.matching import Matching
-from superglue.utils import (AverageTimer, VideoStreamer,
-                          make_matching_plot_fast, frame2tensor, keyframe2tensor)
+from superglue.utils import (frame2tensor, keyframe2tensor)
 ##import super glue and super point
 ##################################################
 
@@ -70,9 +69,9 @@ def depthestimate():
     Frame = FrameData.get(id)
     if Frame == None :
         json_data = ujson.dumps({'res': (), 'w': 0, 'h': 0, 'b':False})
-        return json_data;
+        return json_data
     img = Frame['rgb']
-    input_batch = transform(img).to(device3)
+    input_batch = transform(img).to(device0)
 
     with torch.no_grad():
         prediction = midas(input_batch)
@@ -92,7 +91,7 @@ def depthestimate():
 
     json_data = ujson.dumps({'res':prediction.tolist() , 'w':w, 'h':h, 'b':True})
     print("Depth Estimation: %f" % (time.time() - start))
-    return json_data;
+    return json_data
 
 @app.route("/api/reset", methods=['POST'])
 def reset():
@@ -126,7 +125,7 @@ def detect():
     json_data = ujson.dumps({'res': kpts0.tolist(), 'n':n})
 
     print("Detect: %f, %d" % (time.time() - start, n))
-    return json_data;
+    return json_data
 
 @app.route("/api/match", methods=['POST'])
 def match():
@@ -158,6 +157,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='WISE UI Web Server',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '--ip', type=str,
+        help='ip address')
+    parser.add_argument(
+        '--port', type=int, default=35005,
+        help='port number')
 
     #super glue and point
     parser.add_argument(
@@ -216,11 +221,11 @@ if __name__ == "__main__":
 
     opt = parser.parse_args()
     device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-    device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
+    #device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
 
     ###LOAD MIDAS
     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
-    midas.to(device3)
+    midas.to(device0)
     midas.eval()
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.default_transform
@@ -254,4 +259,4 @@ if __name__ == "__main__":
     keys = ['keypoints', 'scores', 'descriptors']
 
     print('Starting the API')
-    app.run(host='143.248.95.112', port = 35005)
+    app.run(host=opt.ip, port = opt.port)
