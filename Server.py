@@ -10,9 +10,7 @@ from flask_cors import CORS
 import base64
 import cv2
 
-from pathlib import Path
 import argparse
-import matplotlib.cm as cm
 import torch
 
 from superglue.matching import Matching
@@ -20,9 +18,6 @@ from superglue.utils import (AverageTimer, VideoStreamer,
                           make_matching_plot_fast, frame2tensor, keyframe2tensor)
 ##import super glue and super point
 ##################################################
-
-from matplotlib import gridspec
-from matplotlib import pyplot as plt
 
 ##################################################
 # API part
@@ -53,12 +48,12 @@ def receiveimage():
     img_array = np.frombuffer(img_encoded, dtype=np.uint8)
     img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     img_cv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
-    img_resized = cv2.resize(img_cv, dsize=(int(width/2), int(height/2)))
+    #img_resized = cv2.resize(img_cv, dsize=(int(width/2), int(height/2)))
     img_gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
 
     temp = {}
     temp['image'] = img_gray
-    temp['resize'] = img_resized
+    temp['rgb'] = img_cv
     FrameData[id] = temp
 
     json_data = ujson.dumps({'res': 0})
@@ -72,7 +67,11 @@ def depthestimate():
     params = ujson.loads(request.data)
     id = int(params['id'])
 
-    img = FrameData[id]['resize']
+    Frame = FrameData.get(id)
+    if Frame == None :
+        json_data = ujson.dumps({'res': (), 'w': 0, 'h': 0, 'b':False})
+        return json_data;
+    img = Frame['rgb']
     input_batch = transform(img).to(device)
 
     with torch.no_grad():
@@ -87,10 +86,11 @@ def depthestimate():
 
     h = prediction.shape[0]
     w = prediction.shape[1]
-    prediction = np.reshape(prediction, w*h)
-    res_str = ' '.join(str(i) for i in prediction)
+    #print(prediction.tolist())
+    #prediction = np.reshape(prediction, w*h)
+    #res_str = ' '.join(str(i) for i in prediction)
 
-    json_data = ujson.dumps({'res':res_str , 'w':w, 'h':h})
+    json_data = ujson.dumps({'res':prediction.tolist() , 'w':w, 'h':h, 'b':True})
     print("Depth Estimation: %f" % (time.time() - start))
     return json_data;
 
