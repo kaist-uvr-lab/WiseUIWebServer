@@ -72,7 +72,7 @@ def depthestimate():
         json_data = ujson.dumps({'res': (), 'w': 0, 'h': 0, 'b':False})
         return json_data;
     img = Frame['rgb']
-    input_batch = transform(img).to(device)
+    input_batch = transform(img).to(device3)
 
     with torch.no_grad():
         prediction = midas(input_batch)
@@ -111,7 +111,7 @@ def detect():
 
     Frame = FrameData[id]
     img = Frame['image']
-    frame_tensor = frame2tensor(img, device)
+    frame_tensor = frame2tensor(img, device0)
     last_data = matching.superpoint({'image': frame_tensor})
 
     ####data 수정
@@ -138,8 +138,8 @@ def match():
     id1 = int(params['id1'])
     id2 = int(params['id2'])
     ####data 불러오기
-    data1 = keyframe2tensor(FrameData[id1], device, '0')
-    data2 = keyframe2tensor(FrameData[id2], device, '1')
+    data1 = keyframe2tensor(FrameData[id1], device0, '0')
+    data2 = keyframe2tensor(FrameData[id2], device0, '1')
 
     pred = matching({**data1, **data2})
     matches = pred['matches0'][0].cpu().numpy()
@@ -215,11 +215,12 @@ if __name__ == "__main__":
         help='Force pytorch to run in CPU mode.')
 
     opt = parser.parse_args()
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
 
     ###LOAD MIDAS
     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
-    midas.to(device)
+    midas.to(device3)
     midas.eval()
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.default_transform
@@ -237,8 +238,6 @@ if __name__ == "__main__":
     else:
         raise ValueError('Cannot specify more than two integers for --resize')
 
-    print('Running inference on device \"{}\"'.format(device))
-
     config = {
         'superpoint': {
             'nms_radius': opt.nms_radius,
@@ -251,8 +250,8 @@ if __name__ == "__main__":
             'match_threshold': opt.match_threshold,
         }
     }
-    matching = Matching(config).eval().to(device)
+    matching = Matching(config).eval().to(device0)
     keys = ['keypoints', 'scores', 'descriptors']
 
     print('Starting the API')
-    app.run(host='127.0.0.1', port = 35005)
+    app.run(host='143.248.95.112', port = 35005)
