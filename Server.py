@@ -18,11 +18,17 @@ from superglue.utils import (frame2tensor, keyframe2tensor)
 ##import super glue and super point
 ##################################################
 
+####WSGI
+#from gevent.pywsgi import WSGIServer
+#from gevent import monkey
+
 ##################################################
 # API part
 ##################################################
 
+global device0, matching
 global FrameData, MatchData, prevID1, prevID2, data1, data2
+
 NUM_MAX_MATCH = 20
 FrameData = {}
 MatchData = {}
@@ -110,6 +116,7 @@ def reset():
 
 @app.route("/detect", methods=['POST'])
 def detect():
+    global device0, matching
     global FrameData#, matchGlobalIDX
     #matchIDX = matchGlobalIDX
     #matchGlobalIDX = (matchGlobalIDX+1)%NUM_MAX_MATCH
@@ -141,9 +148,10 @@ def detect():
 
 @app.route("/match", methods=['POST'])
 def match():
+    global device0, matching
     global FrameData, MatchData#, matchGlobalIDX#, prevID1, prevID2, data1, data2
     start = time.time()
-
+    print("Match=Start")
     #matchIDX = matchGlobalIDX
     #matchGlobalIDX = (matchGlobalIDX + 1) % NUM_MAX_MATCH
     #print("Match=Start=%d" % (matchIDX))
@@ -251,6 +259,7 @@ if __name__ == "__main__":
         '--force_cpu', action='store_true',
         help='Force pytorch to run in CPU mode.')
 
+    global device0, matching
     opt = parser.parse_args()
     device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     #device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
@@ -296,3 +305,5 @@ if __name__ == "__main__":
 
     print('Starting the API')
     app.run(host=opt.ip, port = opt.port, threaded = True)
+    #http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
+    #http.serve_forever()
