@@ -19,8 +19,8 @@ from superglue.utils import (frame2tensor, keyframe2tensor)
 ##################################################
 
 ####WSGI
-#from gevent.pywsgi import WSGIServer
-#from gevent import monkey
+from gevent.pywsgi import WSGIServer
+from gevent import monkey
 
 ##################################################
 # API part
@@ -304,7 +304,7 @@ if __name__ == "__main__":
     keys = ['keypoints', 'scores', 'descriptors']
 
     print('Starting the API')
-    app.run(host=opt.ip, port=opt.port)
+    #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
-    #http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
-    #http.serve_forever()
+    http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
+    http.serve_forever()
