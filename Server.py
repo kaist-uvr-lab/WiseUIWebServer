@@ -22,14 +22,19 @@ from superglue.utils import (frame2tensor, keyframe2tensor)
 # API part
 ##################################################
 
-global FrameData
+global FrameData, MatchData, prevID1, prevID2, data1, data2
+NUM_MAX_MATCH = 20
 FrameData = {}
+MatchData = {}
+#matchGlobalIDX = 0
+prevID1 = -1
+prevID2 = -1
 
 app = Flask(__name__)
 #cors = CORS(app)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
-@app.route("/api/receiveimage", methods=['POST'])
+@app.route("/receiveimage", methods=['POST'])
 def receiveimage():
 
     global FrameData
@@ -59,7 +64,7 @@ def receiveimage():
     print("Data %d, time : %f" % (len(FrameData), time.time() - start))
     return json_data;
 
-@app.route("/api/depthestimate", methods=['POST'])
+@app.route("/depthestimate", methods=['POST'])
 def depthestimate():
     global FrameData
     start = time.time()
@@ -93,17 +98,23 @@ def depthestimate():
     print("Depth Estimation: %f" % (time.time() - start))
     return json_data
 
-@app.route("/api/reset", methods=['POST'])
+@app.route("/reset", methods=['POST'])
 def reset():
-    global FrameData
+    global FrameData, prevID1, prevID2
     FrameData = {}
+    prevID1 = -1
+    prevID2 = -1
     json_data = ujson.dumps({'res': 0})
     print("Reset FrameData")
     return json_data;
 
-@app.route("/api/detect", methods=['POST'])
+@app.route("/detect", methods=['POST'])
 def detect():
-    global FrameData
+    global FrameData#, matchGlobalIDX
+    #matchIDX = matchGlobalIDX
+    #matchGlobalIDX = (matchGlobalIDX+1)%NUM_MAX_MATCH
+    #print("Detect=Start=%d"% (matchIDX))
+
     start = time.time()
     params = ujson.loads(request.data)
     id = int(params['id'])
@@ -114,36 +125,57 @@ def detect():
     last_data = matching.superpoint({'image': frame_tensor})
 
     ####data 수정
-    kpts0 = last_data['keypoints'][0].cpu().detach().numpy()
-    Frame['keypoints'] = kpts0#last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
-    Frame['descriptors'] = last_data['descriptors'][0].cpu().detach().numpy()
+    kpts = last_data['keypoints'][0].cpu().detach().numpy()
+    desc = last_data['descriptors'][0].cpu().detach().numpy()
+    Frame['keypoints'] = kpts#last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
+    Frame['descriptors'] = desc
     Frame['scores'] = last_data['scores'][0].cpu().detach().numpy()
     FrameData[id] = Frame
     ####data 수정
+    n = len(kpts)
 
-    n = len(kpts0)
-    json_data = ujson.dumps({'res': kpts0.tolist(), 'n':n})
-
-    print("Detect: %f, %d" % (time.time() - start, n))
+    json_data = ujson.dumps({'res': kpts.tolist(), 'desc' : desc.tolist(), 'n':n})
+    #json_data = ujson.dumps({'res': kpts.tolist(), 'n': n})
+    print("Detect=End: %f, %d" % (time.time() - start, n))
     return json_data
 
-@app.route("/api/match", methods=['POST'])
+@app.route("/match", methods=['POST'])
 def match():
-    global FrameData
+    global FrameData, MatchData#, matchGlobalIDX#, prevID1, prevID2, data1, data2
     start = time.time()
 
+    #matchIDX = matchGlobalIDX
+    #matchGlobalIDX = (matchGlobalIDX + 1) % NUM_MAX_MATCH
+    #print("Match=Start=%d" % (matchIDX))
     ##data 처리
     params = ujson.loads(request.data)
     id1 = int(params['id1'])
     id2 = int(params['id2'])
     ####data 불러오기
+    #if id1 != prevID1 :
     data1 = keyframe2tensor(FrameData[id1], device0, '0')
+    #    prevID1 = id1
+    #if id2 != prevID2:
     data2 = keyframe2tensor(FrameData[id2], device0, '1')
+    #    prevID2 = id2
 
     pred = matching({**data1, **data2})
-    matches = pred['matches0'][0].cpu().numpy()
-    print("Match : %f %d" % (time.time() - start, len(matches)))
-    json_data = ujson.dumps({'res': matches.tolist(), 'n': len(matches)})
+    matches0 = pred['matches0'][0].cpu().numpy()
+    matches1 = pred['matches1'][0].cpu().numpy()
+
+    MatchData[id1] = {}
+    MatchData[id1][id2] = matches0
+
+    MatchData[id2] = {}
+    MatchData[id2][id1] = matches1
+
+    # 딕셔너리 키 traverse
+    #for key in FrameData.keys():
+    #    print(key)
+
+    #json_data = ujson.dumps({'res': 0})
+    json_data = ujson.dumps({'res': matches0.tolist(), 'n': len(matches0)})
+    print("Match=End : id1 = %d, id2 = %d time = %f %d" % (id1, id2, time.time() - start, len(matches0)))
     return json_data
 
 ##################################################
@@ -192,7 +224,7 @@ if __name__ == "__main__":
         '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
         help='SuperGlue weights')
     parser.add_argument(
-        '--max_keypoints', type=int, default=1000,
+        '--max_keypoints', type=int, default=300,
         help='Maximum number of keypoints detected by Superpoint'
              ' (\'-1\' keeps all keypoints)')
     parser.add_argument(
@@ -256,7 +288,11 @@ if __name__ == "__main__":
         }
     }
     matching = Matching(config).eval().to(device0)
+    #matching=[]
+    #for i in range(NUM_MAX_MATCH):
+    #    matching.append(Matching(config).eval().to(device0))
+
     keys = ['keypoints', 'scores', 'descriptors']
 
     print('Starting the API')
-    app.run(host=opt.ip, port = opt.port)
+    app.run(host=opt.ip, port = opt.port, threaded = True)
