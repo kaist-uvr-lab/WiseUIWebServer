@@ -67,7 +67,7 @@ def receiveimage():
     FrameData[id] = temp
 
     json_data = ujson.dumps({'res': 0})
-    print("Data %d, time : %f" % (len(FrameData), time.time() - start))
+    #print("Data %d, time : %f" % (len(FrameData), time.time() - start))
     return json_data;
 
 @app.route("/depthestimate", methods=['POST'])
@@ -100,7 +100,10 @@ def depthestimate():
     #prediction = np.reshape(prediction, w*h)
     #res_str = ' '.join(str(i) for i in prediction)
 
-    json_data = ujson.dumps({'res':prediction.tolist() , 'w':w, 'h':h, 'b':True})
+    res1 = str(base64.b64encode(prediction))
+    #print(res1)
+
+    json_data = ujson.dumps({'res':res1 , 'w':w, 'h':h, 'b':True})
     print("Depth Estimation: %f" % (time.time() - start))
     return json_data
 
@@ -140,10 +143,13 @@ def detect():
     FrameData[id] = Frame
     ####data 수정
     n = len(kpts)
+    res1 = str(base64.b64encode(kpts))
+    res2 = str(base64.b64encode(desc))
 
-    json_data = ujson.dumps({'res': kpts.tolist(), 'desc' : desc.tolist(), 'n':n})
+    #print(res2)
+    json_data = ujson.dumps({'res': res1, 'desc' : res2, 'n':n}) #desc.tolist()
     #json_data = ujson.dumps({'res': kpts.tolist(), 'n': n})
-    print("Detect=End: %f, %d" % (time.time() - start, n))
+    #print("Detect=End: %f, %d" % (time.time() - start, n))
     return json_data
 
 @app.route("/match", methods=['POST'])
@@ -183,7 +189,7 @@ def match():
 
     #json_data = ujson.dumps({'res': 0})
     json_data = ujson.dumps({'res': matches0.tolist(), 'n': len(matches0)})
-    print("Match=End : id1 = %d, id2 = %d time = %f %d" % (id1, id2, time.time() - start, len(matches0)))
+    #print("Match=End : id1 = %d, id2 = %d time = %f %d" % (id1, id2, time.time() - start, len(matches0)))
     return json_data
 
 ##################################################
