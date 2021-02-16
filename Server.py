@@ -446,11 +446,11 @@ def featurematch():
     id1 = int(params['id1'])
     id2 = int(params['id2'])
 
+    start = time.time()
     desc1 = FrameData[id1]['descriptors'].transpose()
     desc2 = FrameData[id2]['descriptors'].transpose()
-
-    matches = bf.knnMatch(desc1, desc2, k=2)
-    #matches  = flann.knnMatch(desc1.transpose(), desc2.transpose(), k=2)
+    #matches = bf.knnMatch(desc1, desc2, k=2)
+    matches  = flann.knnMatch(desc1, desc2, k=2)
     good = np.empty((len(matches)), np.int32)
     success = 0
     for i, (m, n) in enumerate(matches):
@@ -460,7 +460,9 @@ def featurematch():
             success = success+1
         else:
             good[i] = 10000
-    print("match : id = %d, %d, res %d"%(id1, id2, success))
+    end = time.time()
+    print("Matching time = %f"%(end-start))
+    #print("match : id = %d, %d, res %d"%(id1, id2, success))
     #print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
     # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
 
