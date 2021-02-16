@@ -1,4 +1,4 @@
-
+import threading
 ##################################################
 ##import super glue and super point
 import ujson
@@ -41,6 +41,9 @@ MatchData = {}
 mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
 nReferenceFrameID = -1;
 
+ConditionVariable = threading.Condition()
+message = []
+
 #matchGlobalIDX = 0
 prevID1 = -1
 prevID2 = -1
@@ -48,6 +51,48 @@ prevID2 = -1
 app = Flask(__name__)
 #cors = CORS(app)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
+
+def work(cv, SuperPointAndGlue, Frames, queue):
+    print("Start Message Processing Thread")
+    while True:
+        cv.acquire()
+        cv.wait()
+        message = queue.pop()
+        cv.release()
+        ##### 처리 시작
+        start = time.time()
+        img_encoded = base64.b64decode(message['img'])
+        id = int(message['id'])
+        width = int(message['w'])
+        height = int(message['h'])
+        channel = int(message['c'])
+
+        img_array = np.frombuffer(img_encoded, dtype=np.uint8)
+        img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+        frame_tensor = frame2tensor(img, device0)
+        last_data = SuperPointAndGlue.superpoint({'image': frame_tensor})
+
+        kpts = last_data['keypoints'][0].cpu().detach().numpy()
+        desc = last_data['descriptors'][0].cpu().detach().numpy()
+        scores = last_data['scores'][0].cpu().detach().numpy()
+        end1 = time.time()
+        Frame = {}
+        Frame['image'] = img
+        Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
+        Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
+        Frame['scores'] = scores
+        Frame['rgb'] = img_cv
+        n = len(kpts)
+        ##mapping server에 전달
+        global mappingserver_addr, FrameData
+        FrameData[id] = Frame
+        requests.post(mappingserver_addr, ujson.dumps({'id': id, 'n': n}))
+        end2 = time.time()
+
+        print("Message Processing = %d : %d : %f %f %d"%(id, len(FrameData), end2-start, end2-end1, len(queue)))
+    print("End Message Processing Thread")
+
 
 #######################################################
 @app.route("/SetReferenceFrameID", methods=['POST'])
@@ -67,13 +112,24 @@ def GetReferenceFrameID():
 
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
+    start = time.time()
     params = ujson.loads(request.data)
+    id = int(params['id'])
+    end = time.time()
+    print("Receive Time : %f = %d"%(end-start, id))
+    global message
+    message.append(params)
+    global ConditionVariable
+    ConditionVariable.acquire()
+    ConditionVariable.notify()
+    ConditionVariable.release()
+
+    """
     img_encoded = base64.b64decode(params['img'])
     width = int(params['w'])
     height = int(params['h'])
     channel = int(params['c'])
-    id = int(params['id'])
-
+    
     img_array = np.frombuffer(img_encoded, dtype=np.uint8)
     img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
@@ -99,6 +155,8 @@ def ReceiveAndDetect():
     global mappingserver_addr
     requests.post(mappingserver_addr,  ujson.dumps({'id':id,'n':n}))
     return ujson.dumps({'id':id,'n':n})
+    """
+    return ujson.dumps({'id':id})
 
 ########################################################
 @app.route("/sendimage", methods=['POST'])
@@ -538,9 +596,15 @@ if __name__ == "__main__":
     """
     keys = ['keypoints', 'scores', 'descriptors']
 
+    th1 = threading.Thread(target=work, args=(ConditionVariable, matching, FrameData, message))
+    th1.start()
+    #th1.join()
+
     print('Starting the API')
     #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
     http.serve_forever()
+
+
 
