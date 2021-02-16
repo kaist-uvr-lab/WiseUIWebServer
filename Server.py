@@ -449,8 +449,8 @@ def featurematch():
     start = time.time()
     desc1 = FrameData[id1]['descriptors'].transpose()
     desc2 = FrameData[id2]['descriptors'].transpose()
-    #matches = bf.knnMatch(desc1, desc2, k=2)
-    matches  = flann.knnMatch(desc1, desc2, k=2)
+    matches = bf.knnMatch(desc1, desc2, k=2)
+    #matches  = flann.knnMatch(desc1, desc2, k=2)
     good = np.empty((len(matches)), np.int32)
     success = 0
     for i, (m, n) in enumerate(matches):
