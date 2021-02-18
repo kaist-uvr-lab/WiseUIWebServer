@@ -39,9 +39,11 @@ NUM_MAX_MATCH = 20
 FrameData = {}
 MatchData = {}
 mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
+mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
 nReferenceFrameID = -1;
 
 ConditionVariable = threading.Condition()
+ConditionVariable2 = threading.Condition()
 message = []
 
 #matchGlobalIDX = 0
@@ -52,12 +54,48 @@ app = Flask(__name__)
 #cors = CORS(app)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
-def work(cv, SuperPointAndGlue, Frames, queue):
+##work에서 호출하는 cv가 필요함.
+def work2(conv2, matcher):
+    print("Start Matching Thread")
+    while True:
+        conv2.acquire()
+        conv2.wait()
+        start = time.time()
+        ids = list(FrameData.keys())
+        conv2.release()
+        lastID = ids.pop()
+        ids.reverse()
+
+        nID = 0
+        for id in ids:
+            desc1 = FrameData[lastID]['descriptors'].transpose()
+            desc2 = FrameData[id]['descriptors'].transpose()
+            matches = matcher.knnMatch(desc1, desc2, k=2)
+            good = np.empty((len(matches)))
+            success = 0
+            for i, (m, n) in enumerate(matches):
+                if m.distance < 0.7 * n.distance:
+                    good[i] = m.trainIdx
+                    success = success + 1
+                else:
+                    good[i] = 10000
+            nID = nID+1
+            if nID == 6:
+                break
+            if success < 30:
+                break
+        end = time.time()
+        print("Matching Thread ID= %d, %f = %d"%(lastID,end-start, nID))
+
+
+def work(cv, condition2, SuperPointAndGlue, queue):
     print("Start Message Processing Thread")
+    global mappingserver_addr, FrameData
     while True:
         cv.acquire()
         cv.wait()
         message = queue.pop()
+        queue.clear()
         cv.release()
         ##### 처리 시작
         start = time.time()
@@ -85,29 +123,96 @@ def work(cv, SuperPointAndGlue, Frames, queue):
         Frame['rgb'] = img_cv
         n = len(kpts)
         ##mapping server에 전달
-        global mappingserver_addr, FrameData
+
         FrameData[id] = Frame
         requests.post(mappingserver_addr, ujson.dumps({'id': id, 'n': n}))
         end2 = time.time()
 
+        condition2.acquire()
+        condition2.notify()
+        condition2.release()
+
+        #thtemp =  threading.Thread(target=supergluematch2, args=(SuperPointAndGlue, id))
+        #thtemp.start()
         print("Message Processing = %d : %d : %f %f %d"%(id, len(FrameData), end2-start, end2-end1, len(queue)))
     print("End Message Processing Thread")
 
+def supergluematch2(SuperGlue, id):
+    global FrameData, nReferenceFrameID
+    start = time.time()
+    data1 = keyframe2tensor(FrameData[id], device0, '0')
+    data2 = keyframe2tensor(FrameData[nReferenceFrameID], device0, '1')
+    pred = matching({**data1, **data2})
+    matches0 = pred['matches0'][0].cpu().numpy()
+    end = time.time()
+    print("SuperGlue = %f %d"%(end-start, len(matches0)))
 
 #######################################################
+@app.route("/SaveMap", methods=['POST'])
+def SaveMap():
+    global FrameData
+    idx = 0
+    total = 0
+    keys = []
+    StoringData = {};
+    for id, Frame in FrameData.items():
+        NewFrame = {}
+        idx = idx+1
+        if idx % 6 !=0:
+            continue
+        total = total+1
+        img = Frame['rgb']
+        _, img = cv2.imencode('.jpg', img)
+        NewFrame['image'] = str(base64.b64encode(img))
+        NewFrame['keypoints'] = Frame['keypoints'].tolist()#str(base64.b64encode(Frame['keypoints']))#Frame['keypoints'].tolist()
+        NewFrame['descriptors'] =Frame['descriptors'].tolist()
+        StoringData[str(id)] = NewFrame;
+        keys.append(str(id))
+
+    StoringData['total']=total
+    StoringData['keys'] = keys
+    a = ujson.dumps(StoringData)
+    f = open('./map/map.bin', 'wb')
+    f.write(a.encode())
+    f.close()
+    return ujson.dumps({'id': 0})
+
+@app.route("/LoadMap", methods=['POST'])
+def LoadMap():
+    global FrameData
+    f = open('./map/map.bin', 'rb')
+    data = f.read().decode()
+    f.close()
+    DATA = ujson.loads(data)
+    n = DATA['total']
+    print("LoadMap %d"%(n))
+    requests.post(mappingserver_addr2, ujson.dumps(DATA))
+
+
+    """
+    DATA = ujson.loads(data)
+    for id, Frame in DATA.items():
+        if id=='total':
+            break
+        print("ID = %d"%(int(id)))
+        print(Frame['keypoints'])
+    n = DATA['total']
+    """
+    return ujson.dumps({'id': 0})
+
 @app.route("/SetReferenceFrameID", methods=['POST'])
 def SetReferenceFrameID():
     global nReferenceFrameID
     params = ujson.loads(request.data)
     id = int(params['id'])
     nReferenceFrameID = id
-    print("Set Reference Frame %d"%(nReferenceFrameID))
+    #print("Set Reference Frame ID = %d"%(nReferenceFrameID))
     return ujson.dumps({'id': id})
 
 @app.route("/GetReferenceFrameID", methods=['POST'])
 def GetReferenceFrameID():
     global nReferenceFrameID
-    print("GetReferenceFrameID %d" % (nReferenceFrameID))
+    #print("Get Reference Frame ID = %d" % (nReferenceFrameID))
     return ujson.dumps({'n': nReferenceFrameID})
 
 @app.route("/ReceiveAndDetect", methods=['POST'])
@@ -399,7 +504,7 @@ def getDesc():
     json_data = ujson.dumps({'desc': res})
     return json_data
 
-@app.route("/match", methods=['POST'])
+@app.route("/supergluematch", methods=['POST'])
 def supergluematch():
     global device0, matching
     global FrameData, MatchData#, matchGlobalIDX#, prevID1, prevID2, data1, data2
@@ -441,12 +546,10 @@ def supergluematch():
 
 @app.route("/featurematch", methods=['POST'])
 def featurematch():
-    #start = time.time()
     params = ujson.loads(request.data)
     id1 = int(params['id1'])
     id2 = int(params['id2'])
 
-    start = time.time()
     desc1 = FrameData[id1]['descriptors'].transpose()
     desc2 = FrameData[id2]['descriptors'].transpose()
     matches = bf.knnMatch(desc1, desc2, k=2)
@@ -460,15 +563,11 @@ def featurematch():
             success = success+1
         else:
             good[i] = 10000
-    end = time.time()
-    print("Matching time = %f"%(end-start))
     #print("match : id = %d, %d, res %d"%(id1, id2, success))
     #print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
     # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
-
     #res = str(base64.b64encode(good))
-    json_data = ujson.dumps({'matches': good.tolist()})
-    return json_data
+    return ujson.dumps({'matches': good.tolist()})
 ##################################################
 # END API part
 ##################################################
@@ -598,8 +697,10 @@ if __name__ == "__main__":
     """
     keys = ['keypoints', 'scores', 'descriptors']
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, matching, FrameData, message))
+    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message))
     th1.start()
+    th2 = threading.Thread(target=work2, args=(ConditionVariable2, bf))
+    th2.start()
     #th1.join()
 
     print('Starting the API')
