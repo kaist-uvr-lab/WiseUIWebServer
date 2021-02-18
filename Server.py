@@ -33,10 +33,8 @@ from gevent import monkey
 ##################################################
 
 global device0, matching
-global MatchData, prevID1, prevID2, data1, data2
-global KnnMatchData
+global MatchData
 
-NUM_MAX_MATCH = 20
 FrameData = {}
 MatchData = {}
 mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
@@ -48,13 +46,7 @@ ConditionVariable = threading.Condition()
 ConditionVariable2 = threading.Condition()
 message = []
 
-# matchGlobalIDX = 0
-prevID1 = -1
-prevID2 = -1
-
 app = Flask(__name__)
-
-
 # cors = CORS(app)
 # CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
@@ -71,36 +63,7 @@ def work2(conv2, matcher):
         print("Depth %d" % (lastID))
         Frame = FrameData[lastID]
         img_encoded = Frame['rgb']
-        """
-        cv2.imwrite("a.jpg", img)
-        _, img2 = cv2.imencode('.jpg', img)
-        img_encoded = str(base64.b64encode(img2))
-        """
-        requests.post(depthserver_addr, ujson.dumps({'img': img_encoded}))
-        """
-        ids.reverse()
-        nID = 0
-        for id in ids:
-            desc1 = FrameData[lastID]['descriptors'].transpose()
-            desc2 = FrameData[id]['descriptors'].transpose()
-            matches = matcher.knnMatch(desc1, desc2, k=2)
-            good = np.empty((len(matches)))
-            success = 0
-            for i, (m, n) in enumerate(matches):
-                if m.distance < 0.7 * n.distance:
-                    good[i] = m.trainIdx
-                    success = success + 1
-                else:
-                    good[i] = 10000
-            nID = nID+1
-            if nID == 6:
-                break
-            if success < 30:
-                break
-        end = time.time()
-        print("Matching Thread ID= %d, %f = %d"%(lastID,end-start, nID))
-        """
-
+        requests.post(depthserver_addr, ujson.dumps({'id':lastID,'img': img_encoded}))
 
 def work(cv, condition2, SuperPointAndGlue, queue):
     print("Start Message Processing Thread")
