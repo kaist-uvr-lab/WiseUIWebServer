@@ -38,6 +38,7 @@ global KnnMatchData
 NUM_MAX_MATCH = 20
 FrameData = {}
 MatchData = {}
+pointserver_addr = "http://143.248.96.81:35005/ReceiveDepth"
 mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
 mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
 nReferenceFrameID = -1;
@@ -336,38 +337,29 @@ def segment():
 
 @app.route("/depthestimate", methods=['POST'])
 def depthestimate():
-    global FrameData
     params = ujson.loads(request.data)
-    id = int(params['id'])
+    img_encoded = base64.b64decode(params['img'])
 
-    Frame = FrameData.get(id)
-    if Frame == None :
-        json_data = ujson.dumps({'res': (), 'w': 0, 'h': 0, 'b':False})
-        return json_data
-    img = Frame['rgb']
-    input_batch = transform(img).to(device0)
+    img_array = np.frombuffer(img_encoded, dtype=np.uint8)
+    img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    input_batch = transform(img_cv).to(device0)
 
     with torch.no_grad():
         prediction = midas(input_batch)
-
         prediction = torch.nn.functional.interpolate(
             prediction.unsqueeze(1),
-            size=img.shape[:2],
+            size=img_cv.shape[:2],
             mode="bicubic",
             align_corners=False,
         ).squeeze().cpu().numpy()
 
     h = prediction.shape[0]
     w = prediction.shape[1]
-    #print(prediction.tolist())
-    #prediction = np.reshape(prediction, w*h)
-    #res_str = ' '.join(str(i) for i in prediction)
 
-    res1 = str(base64.b64encode(prediction))
-    #print(res1)
-
-    json_data = ujson.dumps({'res':res1 , 'w':w, 'h':h, 'b':True})
-    return json_data
+    #res = str(base64.b64encode(prediction))
+    #json_data = ujson.dumps({'res':res, 'w':w, 'h':h, 'b':True})
+    #requests.post(pointserver_addr, json_data)
+    return ujson.dumps({'id':0})
 
 @app.route("/reset", methods=['POST'])
 def reset():
@@ -665,8 +657,8 @@ if __name__ == "__main__":
     """
     keys = ['keypoints', 'scores', 'descriptors']
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message))
-    th1.start()
+    #th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message))
+    #th1.start()
 
     print('Starting the API')
     #app.run(host=opt.ip, port=opt.port)
