@@ -55,38 +55,6 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 ##work에서 호출하는 cv가 필요함.
-def work2(conv2, matcher):
-    print("Start Matching Thread")
-    while True:
-        conv2.acquire()
-        conv2.wait()
-        start = time.time()
-        ids = list(FrameData.keys())
-        conv2.release()
-        lastID = ids.pop()
-        ids.reverse()
-
-        nID = 0
-        for id in ids:
-            desc1 = FrameData[lastID]['descriptors'].transpose()
-            desc2 = FrameData[id]['descriptors'].transpose()
-            matches = matcher.knnMatch(desc1, desc2, k=2)
-            good = np.empty((len(matches)))
-            success = 0
-            for i, (m, n) in enumerate(matches):
-                if m.distance < 0.7 * n.distance:
-                    good[i] = m.trainIdx
-                    success = success + 1
-                else:
-                    good[i] = 10000
-            nID = nID+1
-            if nID == 6:
-                break
-            if success < 30:
-                break
-        end = time.time()
-        print("Matching Thread ID= %d, %f = %d"%(lastID,end-start, nID))
-
 
 def work(cv, condition2, SuperPointAndGlue, queue):
     print("Start Message Processing Thread")
@@ -699,9 +667,6 @@ if __name__ == "__main__":
 
     th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message))
     th1.start()
-    th2 = threading.Thread(target=work2, args=(ConditionVariable2, bf))
-    th2.start()
-    #th1.join()
 
     print('Starting the API')
     #app.run(host=opt.ip, port=opt.port)
