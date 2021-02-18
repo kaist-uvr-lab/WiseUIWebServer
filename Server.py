@@ -85,7 +85,7 @@ def work(cv, queue):
         h = prediction.shape[0]
         w = prediction.shape[1]
 
-        res = str(base64.b64encode(prediction))
+        res = base64.b64encode(prediction).decode('ascii')
         requests.post(pointserver_addr, ujson.dumps({'id':id,'depth':res}))
         end = time.time()
         print("Depth Processing = %d : %f : %d"%(id, end-start, len(queue)))
