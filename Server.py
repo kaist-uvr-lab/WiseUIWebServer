@@ -88,7 +88,7 @@ def work(cv, queue):
         res = str(base64.b64encode(prediction))
         requests.post(pointserver_addr, ujson.dumps({'id':id,'depth':res}))
         end = time.time()
-        print("Depth Processing = %d : %d : %f%d"%(id, end-start, len(queue)))
+        print("Depth Processing = %d : %f : %d"%(id, end-start, len(queue)))
     print("End Message Processing Thread")
 
 @app.route("/depthestimate", methods=['POST'])
