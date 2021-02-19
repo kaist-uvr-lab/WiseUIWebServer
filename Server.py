@@ -46,8 +46,12 @@ nLastDepthID = -1
 
 ConditionVariable = threading.Condition()
 ConditionVariable2 = threading.Condition()
+
 message = []
 ids = []
+
+depthImageQueue = []
+depthImgIDQueue = []
 
 app = Flask(__name__)
 # cors = CORS(app)
@@ -67,7 +71,7 @@ def work2(conv2, queue, queue2):
         print("Depth %d" % (lastID))
         requests.post(depthserver_addr+"?id="+str(lastID), message)
 
-def work(cv, condition2, SuperPointAndGlue, queue, queue2):
+def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
     print("Start Message Processing Thread")
     global mappingserver_addr, FrameData
     while True:
@@ -78,7 +82,6 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2):
         cv.release()
         ##### 처리 시작
         start = time.time()
-        print(len(message))
         #img_encoded = base64.b64decode(message['img'])
 
         img_array = np.frombuffer(message, dtype=np.uint8)
@@ -91,12 +94,13 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2):
         desc = last_data['descriptors'][0].cpu().detach().numpy()
         scores = last_data['scores'][0].cpu().detach().numpy()
         end1 = time.time()
+
         Frame = {}
         Frame['image'] = img
         Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
         Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
         Frame['scores'] = scores
-        Frame['rgb'] = message
+        Frame['rgb'] = message #인코딩된 바이트 형태
         n = len(kpts)
         ##mapping server에 전달
 
@@ -104,6 +108,8 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2):
         requests.post(mappingserver_addr, ujson.dumps({'id': id, 'n': n}))
         end2 = time.time()
 
+        dImgQueue.append(message)
+        dIDQueue.append(id)
         condition2.acquire()
         condition2.notify()
         condition2.release()
@@ -255,33 +261,32 @@ def ReceiveAndDetect():
 @app.route("/ReceiveDepth", methods=['POST'])
 def ReceiveDepth():
     global FrameData, nLastDepthID
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-    FrameData[id]['bdepth'] = params['depth']
-    """
+    id = int(request.args.get('id'))
+    FrameData[id]['bdepth'] = request.data
+
     #depth image 저장
     ##base64인코딩 된 결과임. 즉 문자열.
     ##뎁스 이미지로 변환하는 과정. 참고용
-    bdepth = base64.b64decode(params['depth'])
-    darray = np.frombuffer(bdepth, dtype=np.float32)
+    #bdepth = base64.b64decode(params['depth'])
+    darray = np.frombuffer(request.data, dtype=np.float32)
     depth = darray.reshape((480,640))
     cv2.normalize(depth, depth, 0, 255, cv2.NORM_MINMAX)
-    np.array(depth, dtype=np.uint8)
+    depth = np.array(depth, dtype=np.uint8)
     cv2.imwrite("depth.jpg", depth)
     FrameData[id]['depth'] = depth
-    
+    FrameData[id]['bdepth'] = bytes(depth)
     print("Depth Map Update = %d"%(nLastDepthID))
-    """
+
     nLastDepthID = id
-    return ujson.dumps({'id': id})
+    return ""
 
 @app.route("/SendDepth", methods=['POST'])
 def SendDepth():
     if nLastDepthID != -1:
         data = FrameData[nLastDepthID]['bdepth']
     else:
-        data =""
-    return data.encode()#ujson.dumps({'id': nLastDepthID, 'depth':data})
+        data = bytes([])
+    return data#ujson.dumps({'id': nLastDepthID, 'depth':data})
 ########################################################
 @app.route("/sendimage", methods=['POST'])
 def sendimage():
@@ -360,7 +365,6 @@ def detect():
     # print(res2)
     json_data = ujson.dumps({'id': id, 'n': n})
     return json_data
-
 
 """
 @app.route("/segment", methods=['POST'])
@@ -524,11 +528,10 @@ def getDesc():
     ##이것은 받는쪽이나 보내는쪽에서 인코딩, 디코딩 하는 시간도 고려해야 한다는 것을 의미하는듯
     params = ujson.loads(request.data)
     id = int(params['id'])
-    desc1 = FrameData[id][
-        'descriptors']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
-    res = str(base64.b64encode(desc1))
-    json_data = ujson.dumps({'desc': res})
-    return json_data
+    desc1 = FrameData[id]['descriptors']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
+    #res = str(base64.b64encode(desc1))
+    #json_data = ujson.dumps({'desc': res})
+    return bytes(desc1)
 
 
 @app.route("/supergluematch", methods=['POST'])
@@ -727,9 +730,9 @@ if __name__ == "__main__":
     """
     keys = ['keypoints', 'scores', 'descriptors']
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message, ids))
+    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message, ids, depthImageQueue, depthImgIDQueue))
     th1.start()
-    th2 = threading.Thread(target=work2, args=(ConditionVariable2, message, ids))
+    th2 = threading.Thread(target=work2, args=(ConditionVariable2, depthImageQueue, depthImgIDQueue))
     th2.start()
     # th1.join()
 
