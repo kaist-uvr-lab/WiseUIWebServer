@@ -32,6 +32,7 @@ from gevent import monkey
 # API part
 ##################################################
 
+
 global device0, matching
 global MatchData
 
@@ -41,48 +42,46 @@ mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
 mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
 depthserver_addr = "http://143.248.95.112:35005/depthestimate"
 nReferenceFrameID = -1;
+nLastDepthID = -1
 
 ConditionVariable = threading.Condition()
 ConditionVariable2 = threading.Condition()
 message = []
+ids = []
 
 app = Flask(__name__)
 # cors = CORS(app)
 # CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 ##work에서 호출하는 cv가 필요함.
-def work2(conv2, matcher):
+def work2(conv2, queue, queue2):
     print("Start Matching Thread")
     while True:
         conv2.acquire()
         conv2.wait()
         start = time.time()
-        ids = list(FrameData.keys())
+        message = queue.pop()
+        id = queue2.pop()
         conv2.release()
-        lastID = ids.pop()
+        lastID = id
         print("Depth %d" % (lastID))
-        Frame = FrameData[lastID]
-        img_encoded = Frame['rgb']
-        requests.post(depthserver_addr, ujson.dumps({'id':lastID,'img': img_encoded}))
+        requests.post(depthserver_addr+"?id="+str(lastID), message)
 
-def work(cv, condition2, SuperPointAndGlue, queue):
+def work(cv, condition2, SuperPointAndGlue, queue, queue2):
     print("Start Message Processing Thread")
     global mappingserver_addr, FrameData
     while True:
         cv.acquire()
         cv.wait()
-        message = queue.pop()
-        queue.clear()
+        message = queue[-1]
+        id = queue2[-1]
         cv.release()
         ##### 처리 시작
         start = time.time()
-        img_encoded = base64.b64decode(message['img'])
-        id = int(message['id'])
-        width = int(message['w'])
-        height = int(message['h'])
-        channel = int(message['c'])
+        print(len(message))
+        #img_encoded = base64.b64decode(message['img'])
 
-        img_array = np.frombuffer(img_encoded, dtype=np.uint8)
+        img_array = np.frombuffer(message, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
         frame_tensor = frame2tensor(img, device0)
@@ -97,7 +96,7 @@ def work(cv, condition2, SuperPointAndGlue, queue):
         Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
         Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
         Frame['scores'] = scores
-        Frame['rgb'] = message['img']
+        Frame['rgb'] = message
         n = len(kpts)
         ##mapping server에 전달
 
@@ -114,7 +113,6 @@ def work(cv, condition2, SuperPointAndGlue, queue):
         print("Message Processing = %d : %d : %f %f %d" % (id, len(FrameData), end2 - start, end2 - end1, len(queue)))
     print("End Message Processing Thread")
 
-
 def supergluematch2(SuperGlue, id):
     global FrameData, nReferenceFrameID
     start = time.time()
@@ -127,6 +125,12 @@ def supergluematch2(SuperGlue, id):
 
 
 #######################################################
+@app.route("/Connect", methods=['GET'])
+def Connect():
+    fx = request.args.get('fx')
+    print("fx = "+(fx))
+    return ""
+
 @app.route("/SaveMap", methods=['POST'])
 def SaveMap():
     global FrameData
@@ -201,13 +205,15 @@ def GetReferenceFrameID():
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
     start = time.time()
-    params = ujson.loads(request.data)
-    id = int(params['id'])
+    #params = ujson.loads(request.data)
+    id = int(request.args.get('id'))
     end = time.time()
     print("Receive Time : %f = %d" % (end - start, id))
-    global message
-    message.append(params)
+    global message, ids
+    ids.append(id)
+    message.append(request.data)
     global ConditionVariable
+
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
@@ -246,7 +252,36 @@ def ReceiveAndDetect():
     """
     return ujson.dumps({'id': id})
 
+@app.route("/ReceiveDepth", methods=['POST'])
+def ReceiveDepth():
+    global FrameData, nLastDepthID
+    params = ujson.loads(request.data)
+    id = int(params['id'])
+    FrameData[id]['bdepth'] = params['depth']
+    """
+    #depth image 저장
+    ##base64인코딩 된 결과임. 즉 문자열.
+    ##뎁스 이미지로 변환하는 과정. 참고용
+    bdepth = base64.b64decode(params['depth'])
+    darray = np.frombuffer(bdepth, dtype=np.float32)
+    depth = darray.reshape((480,640))
+    cv2.normalize(depth, depth, 0, 255, cv2.NORM_MINMAX)
+    np.array(depth, dtype=np.uint8)
+    cv2.imwrite("depth.jpg", depth)
+    FrameData[id]['depth'] = depth
+    
+    print("Depth Map Update = %d"%(nLastDepthID))
+    """
+    nLastDepthID = id
+    return ujson.dumps({'id': id})
 
+@app.route("/SendDepth", methods=['POST'])
+def SendDepth():
+    if nLastDepthID != -1:
+        data = FrameData[nLastDepthID]['bdepth']
+    else:
+        data =""
+    return data.encode()#ujson.dumps({'id': nLastDepthID, 'depth':data})
 ########################################################
 @app.route("/sendimage", methods=['POST'])
 def sendimage():
@@ -391,11 +426,10 @@ def depthestimate():
 
 @app.route("/reset", methods=['POST'])
 def reset():
-    global FrameData, prevID1, prevID2
+    global FrameData, nLastDepthID, nReferenceFrameID
     FrameData = {}
     nReferenceFrameID = -1
-    prevID1 = -1
-    prevID2 = -1
+    nLastDepthID = -1
     json_data = ujson.dumps({'res': 0})
     print("Reset FrameData")
     return json_data
@@ -693,9 +727,9 @@ if __name__ == "__main__":
     """
     keys = ['keypoints', 'scores', 'descriptors']
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message))
+    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message, ids))
     th1.start()
-    th2 = threading.Thread(target=work2, args=(ConditionVariable2, bf))
+    th2 = threading.Thread(target=work2, args=(ConditionVariable2, message, ids))
     th2.start()
     # th1.join()
 
