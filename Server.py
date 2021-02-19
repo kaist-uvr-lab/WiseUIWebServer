@@ -46,6 +46,7 @@ nReferenceFrameID = -1;
 ConditionVariable = threading.Condition()
 ConditionVariable2 = threading.Condition()
 message = []
+ids = []
 
 #matchGlobalIDX = 0
 prevID1 = -1
@@ -57,20 +58,20 @@ app = Flask(__name__)
 
 ##work에서 호출하는 cv가 필요함.
 
-def work(cv, queue):
+def work(cv, queue, queue2):
     print("Start Message Processing Thread")
     global pointserver_addr
     while True:
         cv.acquire()
         cv.wait()
         message = queue.pop()
+        id = queue2.pop()
         queue.clear()
+        queue2.clear()
         cv.release()
         ##### 처리 시작
         start = time.time()
-        id = int(message['id'])
-        img_encoded = base64.b64decode(message['img'])
-        img_array = np.frombuffer(img_encoded, dtype=np.uint8)
+        img_array = np.frombuffer(message, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         input_batch = transform(img_cv).to(device0)
         with torch.no_grad():
@@ -85,23 +86,24 @@ def work(cv, queue):
         h = prediction.shape[0]
         w = prediction.shape[1]
 
-        res = base64.b64encode(prediction).decode('ascii')
-        requests.post(pointserver_addr, ujson.dumps({'id':id,'depth':res}))
+        #res = base64.b64encode(prediction).decode('ascii')
+        #requests.post(pointserver_addr, ujson.dumps({'id':id,'depth':res}))
+        requests.post(pointserver_addr+"?id="+id, bytes(prediction))
         end = time.time()
-        print("Depth Processing = %d : %f : %d"%(id, end-start, len(queue)))
+        print("Depth Processing = %s : %f : %d"%(id, end-start, len(queue)))
     print("End Message Processing Thread")
 
 @app.route("/depthestimate", methods=['POST'])
 def depthestimate():
-    params = ujson.loads(request.data)
-
-    global message
-    message.append(params)
+    #params = ujson.loads(request.data)
+    global message, ids
+    ids.append(request.args.get('id'))
+    message.append(request.data)
     global ConditionVariable
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
-    return ujson.dumps({'id':0})
+    return "" #ujson.dumps({'id':0})
 
 ##################################################
 # END API part
@@ -188,7 +190,7 @@ if __name__ == "__main__":
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.default_transform
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable,message))
+    th1 = threading.Thread(target=work, args=(ConditionVariable,message, ids))
     th1.start()
 
     print('Starting the API')
