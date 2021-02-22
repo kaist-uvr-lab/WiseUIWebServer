@@ -31,7 +31,7 @@ from gevent import monkey
 ##################################################
 # API part
 ##################################################
-
+#LABEL_NAMES = np.array(['wall' ,'building' ,'sky' ,'floor' ,'tree' ,'ceiling' ,'road' ,'bed' ,'windowpane' ,'grass' ,'cabinet' ,'sidewalk' ,'person' ,'earth' ,'door' ,'table' ,'mountain' ,'plant' ,'curtain' ,'chair' ,'car' ,'water' ,'painting' ,'sofa' ,'shelf' ,'house' ,'sea' ,'mirror' ,'rug' ,'field' ,'armchair' ,'seat' ,'fence' ,'desk' ,'rock' ,'wardrobe' ,'lamp' ,'bathtub' ,'railing' ,'cushion' ,'base' ,'box' ,'column' ,'signboard' ,'chest of drawers' ,'counter' ,'sand' ,'sink' ,'skyscraper' ,'fireplace' ,'refrigerator' ,'grandstand' ,'path' ,'stairs' ,'runway' ,'case' ,'pool table' ,'pillow' ,'screen door' ,'stairway' ,'river' ,'bridge' ,'bookcase' ,'blind' ,'coffee table' ,'toilet' ,'flower' ,'book' ,'hill' ,'bench' ,'countertop' ,'stove' ,'palm' ,'kitchen island' ,'computer' ,'swivel chair' ,'boat' ,'bar' ,'arcade machine' ,'hovel' ,'bus' ,'towel' ,'light' ,'truck' ,'tower' ,'chandelier' ,'awning' ,'streetlight' ,'booth' ,'television' ,'airplane' ,'dirt track' ,'apparel' ,'pole' ,'land' ,'bannister' ,'escalator' ,'ottoman' ,'bottle' ,'buffet' ,'poster' ,'stage' ,'van' ,'ship' ,'fountain' ,'conveyer belt' ,'canopy' ,'washer' ,'plaything' ,'swimming pool' ,'stool' ,'barrel' ,'basket' ,'waterfall' ,'tent' ,'bag' ,'minibike' ,'cradle' ,'oven' ,'ball' ,'food' ,'step' ,'tank' ,'trade name' ,'microwave' ,'pot' ,'animal' ,'bicycle' ,'lake' ,'dishwasher' ,'screen' ,'blanket' ,'sculpture' ,'hood' ,'sconce' ,'vase' ,'traffic light' ,'tray' ,'ashcan' ,'fan' ,'pier' ,'crt screen' ,'plate' ,'monitor' ,'bulletin board' ,'shower' ,'radiator' ,'glass' ,'clock' ,'flag'])
 
 global device0, matching
 global MatchData
@@ -40,7 +40,8 @@ FrameData = {}
 MatchData = {}
 mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
 mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
-depthserver_addr = "http://143.248.95.112:35005/depthestimate"
+depthserver_addr    = "http://143.248.95.112:35005/depthestimate"
+semanticserver_addr = "http://143.248.95.112:35006/segment"
 nReferenceFrameID = -1;
 nLastDepthID = -1
 
@@ -70,6 +71,7 @@ def work2(conv2, queue, queue2):
         lastID = id
         print("Depth %d" % (lastID))
         requests.post(depthserver_addr+"?id="+str(lastID), message)
+        requests.post(semanticserver_addr+"?id="+str(lastID), message)
 
 def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
     print("Start Message Processing Thread")
@@ -128,7 +130,6 @@ def supergluematch2(SuperGlue, id):
     matches0 = pred['matches0'][0].cpu().numpy()
     end = time.time()
     print("SuperGlue = %f %d" % (end - start, len(matches0)))
-
 
 #######################################################
 @app.route("/Connect", methods=['GET'])
@@ -272,12 +273,28 @@ def ReceiveDepth():
     depth = darray.reshape((480,640))
     cv2.normalize(depth, depth, 0, 255, cv2.NORM_MINMAX)
     depth = np.array(depth, dtype=np.uint8)
+
     cv2.imwrite("depth.jpg", depth)
     FrameData[id]['depth'] = depth
     FrameData[id]['bdepth'] = bytes(depth)
     print("Depth Map Update = %d"%(nLastDepthID))
 
     nLastDepthID = id
+    return ""
+
+@app.route("/ReceiveSegmentation", methods=['POST'])
+def ReceiveSegmentation():
+    global FrameData
+    id = int(request.args.get('id'))
+    FrameData[id]['segmentation'] = request.data
+    """
+    w = int(request.args.get('w'))
+    h = int(request.args.get('h'))
+    print('SEG data %d, %d %d'%(len(request.data), w, h))
+    iarray = np.frombuffer(request.data, dtype=np.uint8)
+    seg = iarray.reshape((h,w))
+    cv2.imwrite("seg.jpg", seg)
+    """
     return ""
 
 @app.route("/GetLastDepthFrameID", methods=['POST'])
@@ -725,6 +742,7 @@ if __name__ == "__main__":
     #    matching.append(Matching(config).eval().to(device0))
 
     # flann based matcher
+
     FLANN_INDEX_KDTREE = 0
     index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
     search_params = dict(checks=50)  # or pass empty dictionary
