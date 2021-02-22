@@ -31,7 +31,7 @@ from gevent import monkey
 # API part
 ##################################################
 
-global device0, matching
+global matching
 global MatchData, prevID1, prevID2, data1, data2
 global KnnMatchData
 
@@ -73,7 +73,7 @@ def work(cv, queue, queue2):
         start = time.time()
         img_array = np.frombuffer(message, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        input_batch = transform(img_cv).to(device0)
+        input_batch = transform(img_cv).to(device)
         with torch.no_grad():
             prediction = midas(input_batch)
             prediction = torch.nn.functional.interpolate(
@@ -121,6 +121,10 @@ if __name__ == "__main__":
         help='ip address')
     parser.add_argument(
         '--port', type=int, default=35005,
+        help='port number')
+
+    parser.add_argument(
+        '--use_gpu', type=str, default='3',
         help='port number')
 
     #super glue and point
@@ -178,14 +182,14 @@ if __name__ == "__main__":
         '--force_cpu', action='store_true',
         help='Force pytorch to run in CPU mode.')
 
-    global device0, matching
+    global matching
     opt = parser.parse_args()
-    device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
     #device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
 
     ###LOAD MIDAS
     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
-    midas.to(device0)
+    midas.to(device)
     midas.eval()
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.default_transform
