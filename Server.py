@@ -208,6 +208,9 @@ def GetReferenceFrameID():
     # print("Get Reference Frame ID = %d" % (nReferenceFrameID))
     return ujson.dumps({'n': nReferenceFrameID})
 
+@app.route("/GetLastDepthFrameID", methods=['POST'])
+def GetLastDepthFrameID():
+    return ujson.dumps({'id': nLastDepthID})
 
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
@@ -259,6 +262,21 @@ def ReceiveAndDetect():
     """
     return ujson.dumps({'id': id})
 
+@app.route("/ReceiveData", methods=['POST'])
+def ReceiveData():
+    global FrameData, nLastDepthID
+    id = int(request.args.get('id'))
+    key = request.args.get('key')
+    FrameData[id][key] = request.data
+    return ""
+
+@app.route("/SendData", methods=['POST'])
+def SendData():
+    id = int(request.args.get('id'))
+    key = request.args.get('key')
+    data = FrameData[id][key]
+    return data
+
 @app.route("/ReceiveDepth", methods=['POST'])
 def ReceiveDepth():
     global FrameData, nLastDepthID
@@ -297,10 +315,6 @@ def ReceiveSegmentation():
     """
     return ""
 
-@app.route("/GetLastDepthFrameID", methods=['POST'])
-def GetLastDepthFrameID():
-    return ujson.dumps({'id': nLastDepthID})
-
 @app.route("/SendDepth", methods=['POST'])
 def SendDepth():
     id = int(request.args.get('id'))
@@ -312,6 +326,7 @@ def SendDepth():
         data = bytes([])
     """
     return data#ujson.dumps({'id': nLastDepthID, 'depth':data})
+
 ########################################################
 @app.route("/sendimage", methods=['POST'])
 def sendimage():
