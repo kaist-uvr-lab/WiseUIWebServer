@@ -280,12 +280,20 @@ def ReceiveDepth():
     nLastDepthID = id
     return ""
 
+@app.route("/GetLastDepthFrameID", methods=['POST'])
+def GetLastDepthFrameID():
+    return ujson.dumps({'id': nLastDepthID})
+
 @app.route("/SendDepth", methods=['POST'])
 def SendDepth():
+    id = int(request.args.get('id'))
+    data = FrameData[id]['bdepth']
+    """
     if nLastDepthID != -1:
         data = FrameData[nLastDepthID]['bdepth']
     else:
         data = bytes([])
+    """
     return data#ujson.dumps({'id': nLastDepthID, 'depth':data})
 ########################################################
 @app.route("/sendimage", methods=['POST'])
