@@ -19,8 +19,9 @@ from superglue.utils import (frame2tensor, keyframe2tensor)
 ##import super glue and super point
 ##################################################
 
-from module.User import User
-from module.Map  import Map
+from module.User    import User
+from module.Map     import Map
+from module.Message import Message
 
 ####WSGI
 from gevent.pywsgi import WSGIServer
@@ -36,31 +37,30 @@ app = Flask(__name__)
 # CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 ##work에서 호출하는 cv가 필요함.
-def work2(conv2, queue, queue2):
+def work2(conv2, queue):
     print("Start Matching Thread")
     while True:
         conv2.acquire()
         conv2.wait()
         start = time.time()
         message = queue.pop()
-        id = queue2.pop()
+        map = message.map
         conv2.release()
-        lastID = id
+        lastID = message.id
         print("Depth %d" % (lastID))
-        requests.post(depthserver_addr+"?id="+str(lastID), message)
-        requests.post(semanticserver_addr+"?id="+str(lastID), message)
+        requests.post(depthserver_addr+"?map="+map+"&id="+str(lastID), message.data)
+        requests.post(semanticserver_addr+"?map="+map+"&id="+str(lastID), message.data)
 
-def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
+def work(condition1, condition2, SuperPointAndGlue, queue, queue2):
     print("Start Message Processing Thread")
     while True:
-        cv.acquire()
-        cv.wait()
+        condition1.acquire()
+        condition1.wait()
         message = queue[-1]
-        id = queue2[-1]
-        cv.release()
+        condition1.release()
         ##### 처리 시작
         start = time.time()
-        img_array = np.frombuffer(message, dtype=np.uint8)
+        img_array = np.frombuffer(message.data, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
         frame_tensor = frame2tensor(img, device0)
@@ -78,34 +78,28 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
         Frame['image'] = img
         Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
         Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
+        Frame['bkpts'] = kpts.tobytes()
+        Frame['bdesc'] = desc.transpose().tobytes()
+
         Frame['scores'] = scores
-        Frame['rgb'] = message #인코딩된 바이트 형태
+        Frame['rgb'] = message.data #인코딩된 바이트 형태
         n = len(kpts)
         ##mapping server에 전달
-        FrameData[id] = Frame
+        MapData[message.map].Frames[message.id] = Frame
         end2 = time.time()
-        requests.post(mappingserver_addr, ujson.dumps({'id': id, 'n': n}))
+        requests.post(mappingserver_addr, ujson.dumps({'id': message.id, 'map':message.map, 'n': n}))
         end3 = time.time()
 
-        dImgQueue.append(message)
-        dIDQueue.append(id)
+        queue2.append(message)
         condition2.acquire()
         condition2.notify()
         condition2.release()
 
         # thtemp =  threading.Thread(target=supergluematch2, args=(SuperPointAndGlue, id))
         # thtemp.start()
-        print("Message Processing = %d : %d : %f : %f : %f %f %f %d" % (id, len(FrameData), time1-start, time2-time1, end1 - time2, end2 - end1, end3-end2, len(queue)))
+        print("Message Processing = %s %d : %d : %f : " % (message.map, message.id, len(MapData[message.map].Frames), end3 - start))
+        #print("Message Processing = %d : %d : %f : %f : %f %f %f %d" % (id, len(FrameData), time1-start, time2-time1, end1 - time2, end2 - end1, end3-end2, len(queue)))
     print("End Message Processing Thread")
-
-def supergluematch2(SuperGlue, id):
-    start = time.time()
-    #data1 = keyframe2tensor(FrameData[id], device0, '0')
-    #data2 = keyframe2tensor(FrameData[nReferenceFrameID], device0, '1')
-    #pred = matching({**data1, **data2})
-    #matches0 = pred['matches0'][0].cpu().numpy()
-    #end = time.time()
-    #print("SuperGlue = %f %d" % (end - start, len(matches0)))
 
 #######################################################
 @app.route("/Connect", methods=['POST'])
@@ -114,9 +108,24 @@ def Connect():
     id = data['userID']
     map = data['mapName']
     bMapping = data['bMapping']
-    cameraParam = np.array([[data['fx'], 0.0, data['cx']],[0.0, data['fy'], data['cy']],[0.0,0.0,0.0]], dtype = np.float32)
-    imgSize = np.array([data['h'], data['w']])
+    fx = data['fx']
+    fy = data['fy']
+    cx = data['cx']
+    cy = data['cy']
+    w = data['w']
+    h = data['h']
+    cameraParam = np.array([[fx, 0.0, cx],[0.0, fy, cy],[0.0,0.0,1.0]], dtype = np.float32)
+    imgSize = np.array([h, w])
     user = User(id, map, bMapping, cameraParam, imgSize)
+    requests.post(mappingserver_connect, ujson.dumps({
+        'fx':fx,
+        'fy':fy,
+        'cx':cx,
+        'cy':cy,
+        'w':w,
+        'h':h
+    }))
+
     """
     user.id
     user['map'] = map
@@ -133,8 +142,17 @@ def Connect():
     print('Connect Map = %s'%(MapData[map].name))
     return ""
 
+
+@app.route("/reset", methods=['POST'])
+def reset():
+    map = MapData[request.args.get('map')]
+    map.reset()
+    json_data = ujson.dumps({'res': 0})
+    return json_data
+
 @app.route("/SaveMap", methods=['POST'])
 def SaveMap():
+    """
     idx = 0
     total = 0
     keys = []
@@ -160,6 +178,7 @@ def SaveMap():
     f = open('./map/map.bin', 'wb')
     f.write(a.encode())
     f.close()
+    """
     return ujson.dumps({'id': 0})
 
 @app.route("/LoadMap", methods=['POST'])
@@ -183,43 +202,29 @@ def LoadMap():
     """
     return ujson.dumps({'id': 0})
 
-"""
-@app.route("/SetReferenceFrameID", methods=['POST'])
-def SetReferenceFrameID():
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-    nReferenceFrameID = id
-    # print("Set Reference Frame ID = %d"%(nReferenceFrameID))
-    return ujson.dumps({'id': id})
-
-@app.route("/GetReferenceFrameID", methods=['POST'])
-def GetReferenceFrameID():
-    # print("Get Reference Frame ID = %d" % (nReferenceFrameID))
-    return ujson.dumps({'n': nReferenceFrameID})
-
-@app.route("/GetLastDepthFrameID", methods=['POST'])
-def GetLastDepthFrameID():
-    return ujson.dumps({'id': nLastDepthID})
-"""
 @app.route("/GetLastFrameID", methods=['POST'])
 def GetLastFrameID():
-    return ujson.dumps({'n': UpdatedID[request.args.get('key')]})
+    map = MapData[request.args.get('map')]
+    return ujson.dumps({'n': map.UpdateIDs[request.args.get('key')]})
 
 @app.route("/SetLastFrameID", methods=['POST'])
 def SetLastFrameID():
+    map = MapData[request.args.get('map')]
     id = int(request.values.get('id'))
-    UpdatedID[request.values.get('key')] = id
+    map.UpdateIDs[request.values.get('key')] = id
     return "a"
 
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
     start = time.time()
-    #params = ujson.loads(request.data)
+    map = MapData[request.args.get('map')]
     id = int(request.args.get('id'))
+
+    message = Message(map.name, id, request.data)
     end = time.time()
     print("Receive Time : %f = %d" % (end - start, id))
-    ids.append(id)
-    messages.append(request.data)
+
+    messages.append(message)
 
     ConditionVariable.acquire()
     ConditionVariable.notify()
@@ -228,21 +233,55 @@ def ReceiveAndDetect():
 
 @app.route("/ReceiveData", methods=['POST'])
 def ReceiveData():
+    map = MapData[request.args.get('map')]
     id = int(request.args.get('id'))
     key = request.args.get('key')
-    FrameData[id][key] = request.data
-    UpdatedID[key] = id
+
+    map.Frames[id][key] = request.data
+    map.UpdateIDs[key] = id
     return "a"
 
 @app.route("/SendData", methods=['POST'])
 def SendData():
+    map = MapData[request.args.get('map')]
     id = int(request.args.get('id'))
     key = request.args.get('key')
-    data = FrameData[id][key] #이걸 전부 바이트로 변환???
+    print("senddata test %d"%(len(map.Frames)))
+    data = map.Frames[id][key] #이걸 전부 바이트로 변환???
     return data
+
+
+@app.route("/featurematch", methods=['POST'])
+def featurematch():
+    map = MapData[request.args.get('map')]
+    id1 = int(request.args.get('id1'))
+    id2 = int(request.args.get('id2'))
+
+    desc1 = map.Frames[id1]['descriptors'].transpose()
+    desc2 = map.Frames[id2]['descriptors'].transpose()
+    matches = bf.knnMatch(desc1, desc2, k=2)
+    # matches  = flann.knnMatch(desc1, desc2, k=2)
+    good = np.empty((len(matches)), np.int32)
+    success = 0
+    for i, (m, n) in enumerate(matches):
+        # print("%d %d : %f %f"%(m.queryIdx, n.trainIdx, m.distance, n.distance))
+        if m.distance < 0.7 * n.distance:
+            good[i] = m.trainIdx
+            success = success + 1
+        else:
+            good[i] = 10000
+    # print("match : id = %d, %d, res %d"%(id1, id2, success))
+    # print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
+    # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
+    # res = str(base64.b64encode(good))
+    return ujson.dumps({'matches': good.tolist()})
+########################################################
+
+
 
 @app.route("/ReceiveDepth", methods=['POST'])
 def ReceiveDepth():
+    """
     id = int(request.args.get('id'))
     FrameData[id]['bdepth'] = request.data
 
@@ -259,240 +298,22 @@ def ReceiveDepth():
     FrameData[id]['depth'] = depth
     FrameData[id]['bdepth'] = bytes(depth)
     #print("Depth Map Update = %d"%(nLastDepthID))
-
+    """
     nLastDepthID = id
     return ""
-
-
-########################################################
-@app.route("/sendimage", methods=['POST'])
-def sendimage():
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-    if id not in FrameData:
-        print("Frame Error::id=%d" % (id))
-    img = FrameData[id]['rgb']
-    _, img = cv2.imencode('.jpg', img)
-    img_encoded = str(base64.b64encode(img))
-    json_data = ujson.dumps({'img': img_encoded})
-    return json_data
-
-
-@app.route("/receiveimage", methods=['POST'])
-def receiveimage():
-    params = ujson.loads(request.data)
-
-    img_encoded = base64.b64decode(params['img'])
-    width = int(params['w'])
-    height = int(params['h'])
-    channel = int(params['c'])
-    id = int(params['id'])
-
-    # Convert PIL Image
-    ######
-    img_array = np.frombuffer(img_encoded, dtype=np.uint8)
-    img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
-    """
-    if channel == 4:
-        print(params)
-        img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGBA2BGR)
-    img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
-
-    """
-    """
-    #cv2.imwrite("./img/test" + str(id) + ".jpg", img_cv)
-    img_cv = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
-    #img_resized = cv2.resize(img_cv, dsize=(int(width/2), int(height/2)))
-    img_gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
-    """
-    temp = {}
-    # temp['image'] = img_gray
-    temp['rgb'] = img_cv
-    FrameData[id] = temp
-    json_data = ujson.dumps({'id': id})
-    return json_data
-
-
-@app.route("/detect", methods=['POST'])
-def detect():
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-
-    if id not in FrameData:
-        print("Frame Error::id=%d" % (id))
-    Frame = FrameData[id]
-    img = cv2.cvtColor(Frame['rgb'], cv2.COLOR_RGB2GRAY)
-    frame_tensor = frame2tensor(img, device0)
-    last_data = matching.superpoint({'image': frame_tensor})
-    Frame['image'] = img
-    ####data 수정
-    kpts = last_data['keypoints'][0].cpu().detach().numpy()
-
-    desc = last_data['descriptors'][0].cpu().detach().numpy()
-    Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
-    Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
-    Frame['scores'] = last_data['scores'][0].cpu().detach().numpy()
-    FrameData[id] = Frame
-    ####data 수정
-    n = len(kpts)
-    # print(res2)
-    json_data = ujson.dumps({'id': id, 'n': n})
-    return json_data
-
 """
-@app.route("/segment", methods=['POST'])
-def segment():
-    global FrameData
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-    Frame = FrameData.get(id)
-    img = Frame['rgb']
-    #img.shape
-    #img.channel()
-
-    r,g,b = cv2.split(img)
-    input = np.array([r,g,b])
-    input = torch.from_numpy(input).float().to(device0).unsqueeze(0)
-    #print(len(input[0]))
-    #input = preprocess_input(img)
-    res = segmentation(input)[0][0].cpu().detach().numpy()
-    #cv2.normalize(res,res,0,255,cv2.NORM)
-    ret, res = cv2.threshold(res, 0.5, 255.0, cv2.THRESH_BINARY)
-    print(res)
-    cv2.imwrite("seg.jpg", res)
-    json_data = ujson.dumps({'res': 0})
-    return json_data
-"""
-
-
-@app.route("/depthestimate", methods=['POST'])
-def depthestimate():
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-
-    Frame = FrameData.get(id)
-    if Frame == None:
-        json_data = ujson.dumps({'res': (), 'w': 0, 'h': 0, 'b': False})
-        return json_data
-    img = Frame['rgb']
-    input_batch = transform(img).to(device0)
-
-    with torch.no_grad():
-        prediction = midas(input_batch)
-
-        prediction = torch.nn.functional.interpolate(
-            prediction.unsqueeze(1),
-            size=img.shape[:2],
-            mode="bicubic",
-            align_corners=False,
-        ).squeeze().cpu().numpy()
-
-    h = prediction.shape[0]
-    w = prediction.shape[1]
-    # print(prediction.tolist())
-    # prediction = np.reshape(prediction, w*h)
-    # res_str = ' '.join(str(i) for i in prediction)
-
-    res1 = str(base64.b64encode(prediction))
-    # print(res1)
-
-    json_data = ujson.dumps({'res': res1, 'w': w, 'h': h, 'b': True})
-    return json_data
-
-
-@app.route("/reset", methods=['POST'])
-def reset():
-    FrameData = {}
-    messages = []
-    ids = []
-
-    depthImageQueue = []
-    depthImgIDQueue = []
-
-    UpdatedID = {};
-    for key in keys_updated_id:
-        UpdatedID[key] = -1
-
-    json_data = ujson.dumps({'res': 0})
-    print("Reset FrameData")
-    return json_data
-
-
-@app.route("/detectWithDesc", methods=['POST'])
-def detectWithDesc():
-    # matchIDX = matchGlobalIDX
-    # matchGlobalIDX = (matchGlobalIDX+1)%NUM_MAX_MATCH
-    # print("Detect=Start=%d"% (matchIDX))
-
-    # start = time.time()
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-
-    Frame = FrameData[id]
-    img = Frame['image']
-    frame_tensor = frame2tensor(img, device0)
-    last_data = matching.superpoint({'image': frame_tensor})
-
-    ####data 수정
-    kpts = last_data['keypoints'][0].cpu().detach().numpy()
-    desc = last_data['descriptors'][0].cpu().detach().numpy()
-    Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
-    Frame['descriptors'] = desc
-    Frame['scores'] = last_data['scores'][0].cpu().detach().numpy()
-    FrameData[id] = Frame
-    ####data 수정
-    n = len(kpts)
-    res1 = str(base64.b64encode(kpts))
-    res2 = str(base64.b64encode(desc))
-    # print("Detect=End: %f %d" % (time.time() - start, n))
-    # print(res2)
-    json_data = ujson.dumps({'pts': res1, 'desc': res2, 'n': n})  # desc.tolist()
-    # json_data = ujson.dumps({'res': kpts.tolist(), 'n': n})
-    return json_data
-
-
-@app.route("/detectOnlyPts", methods=['POST'])
-def detectOnlyPts():
-
-    # start = time.time()
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-
-    Frame = FrameData[id]
-    img = Frame['image']
-    frame_tensor = frame2tensor(img, device0)
-    last_data = matching.superpoint({'image': frame_tensor})
-
-    ####data 수정
-    kpts = last_data['keypoints'][0].cpu().detach().numpy()
-    desc = last_data['descriptors'][0].cpu().detach().numpy()
-    Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
-    Frame['descriptors'] = desc
-    Frame['scores'] = last_data['scores'][0].cpu().detach().numpy()
-    FrameData[id] = Frame
-    ####data 수정
-    n = len(kpts)
-    res1 = str(base64.b64encode(kpts))
-    # print("Detect=End: %f %d" % (time.time() - start, n))
-    # print(res2)
-    json_data = ujson.dumps({'pts': res1, 'n': n})
-    # json_data = ujson.dumps({'res': kpts.tolist(), 'n': n})
-    return json_data
-
-
 @app.route("/getPts", methods=['POST'])
 def getPts():
     ##이것도 사용할 경우 n은 없애기
     ##이것만 요청하는 경우에는 속ㄷ고가 상당히 빠름. 0.006초 정도, 그렇다면 포인트도 분리한다면?
 
+    map = MapData[request.args.get('map')]
     params = ujson.loads(request.data)
     id = int(params['id'])
     pts = FrameData[id]['keypoints']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
     # res = str(base64.b64encode(pts))
     json_data = ujson.dumps({'pts': pts.tolist(), 'n': len(pts)})
     return json_data
-
 
 @app.route("/getDesc", methods=['POST'])
 def getDesc():
@@ -504,10 +325,11 @@ def getDesc():
     #res = str(base64.b64encode(desc1))
     #json_data = ujson.dumps({'desc': res})
     return bytes(desc1)
-
+"""
 
 @app.route("/supergluematch", methods=['POST'])
 def supergluematch():
+    """
     start = time.time()
     print("Match=Start")
     # matchIDX = matchGlobalIDX
@@ -528,47 +350,27 @@ def supergluematch():
     pred = matching({**data1, **data2})
     matches0 = pred['matches0'][0].cpu().numpy()
     matches1 = pred['matches1'][0].cpu().numpy()
-
+    """
+    """
+    #match 정보 저장
     MatchData[id1] = {}
     MatchData[id1][id2] = matches0
 
     MatchData[id2] = {}
     MatchData[id2][id1] = matches1
-
+    """
     # 딕셔너리 키 traverse
     # for key in FrameData.keys():
     #    print(key)
 
     # json_data = ujson.dumps({'res': 0})
-    json_data = ujson.dumps({'res': matches0.tolist(), 'n': len(matches0)})
     # print("Match=End : id1 = %d, id2 = %d time = %f %d" % (id1, id2, time.time() - start, len(matches0)))
-    return json_data
+
+    #json_data = ujson.dumps({'res': matches0.tolist(), 'n': len(matches0)})
+    return ''  #json_data
 
 
-@app.route("/featurematch", methods=['POST'])
-def featurematch():
-    params = ujson.loads(request.data)
-    id1 = int(params['id1'])
-    id2 = int(params['id2'])
 
-    desc1 = FrameData[id1]['descriptors'].transpose()
-    desc2 = FrameData[id2]['descriptors'].transpose()
-    matches = bf.knnMatch(desc1, desc2, k=2)
-    # matches  = flann.knnMatch(desc1, desc2, k=2)
-    good = np.empty((len(matches)), np.int32)
-    success = 0
-    for i, (m, n) in enumerate(matches):
-        # print("%d %d : %f %f"%(m.queryIdx, n.trainIdx, m.distance, n.distance))
-        if m.distance < 0.7 * n.distance:
-            good[i] = m.trainIdx
-            success = success + 1
-        else:
-            good[i] = 10000
-    # print("match : id = %d, %d, res %d"%(id1, id2, success))
-    # print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
-    # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
-    # res = str(base64.b64encode(good))
-    return ujson.dumps({'matches': good.tolist()})
 
 
 ##################################################
@@ -692,20 +494,13 @@ if __name__ == "__main__":
     search_params = dict(checks=50)  # or pass empty dictionary
     flann = cv2.FlannBasedMatcher(index_params, search_params)
     bf = cv2.BFMatcher()  #
-    """
-    segmentation = smp.DeepLabV3Plus(
-        encoder_name='resnet34', encoder_depth=5, encoder_weights='imagenet', encoder_output_stride=16,
-        decoder_channels=256, decoder_atrous_rates=(12, 24, 36),
-        in_channels=3, classes=1, activation=None, upsampling=4, aux_params=None).eval().to(device0)
-    """
 
     UserData = {}
     MapData = {}
-    FrameData = {}
-    MatchData = {}
 
     mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
     mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
+    mappingserver_connect = "http://143.248.96.81:35006/connect"
     depthserver_addr = "http://143.248.95.112:35005/depthestimate"
     semanticserver_addr = "http://143.248.95.112:35006/segment"
 
@@ -713,18 +508,11 @@ if __name__ == "__main__":
     ConditionVariable2 = threading.Condition()
 
     messages = []
-    ids = []
+    messages2 = []
 
-    depthImageQueue = []
-    depthImgIDQueue = []
-    keys_updated_id = ['bsegmentation', 'bdepth', 'reference']
-    UpdatedID = {};
-    for key in keys_updated_id:
-        UpdatedID[key] = -1
-
-    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, messages, ids, depthImageQueue, depthImgIDQueue))
+    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, messages, messages2))
     th1.start()
-    th2 = threading.Thread(target=work2, args=(ConditionVariable2, depthImageQueue, depthImgIDQueue))
+    th2 = threading.Thread(target=work2, args=(ConditionVariable2, messages2))
     th2.start()
     # th1.join()
 
