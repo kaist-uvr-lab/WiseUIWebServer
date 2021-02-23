@@ -16,14 +16,12 @@ import torch
 
 from superglue.matching import Matching
 from superglue.utils import (frame2tensor, keyframe2tensor)
-
 ##import super glue and super point
 ##################################################
-"""
-####segmentataion
-import segmentation_models_pytorch as smp
-from segmentation_models_pytorch.encoders import get_preprocessing_fn
-"""
+
+from module.User import User
+from module.Map  import Map
+
 ####WSGI
 from gevent.pywsgi import WSGIServer
 from gevent import monkey
@@ -32,27 +30,6 @@ from gevent import monkey
 # API part
 ##################################################
 #LABEL_NAMES = np.array(['wall' ,'building' ,'sky' ,'floor' ,'tree' ,'ceiling' ,'road' ,'bed' ,'windowpane' ,'grass' ,'cabinet' ,'sidewalk' ,'person' ,'earth' ,'door' ,'table' ,'mountain' ,'plant' ,'curtain' ,'chair' ,'car' ,'water' ,'painting' ,'sofa' ,'shelf' ,'house' ,'sea' ,'mirror' ,'rug' ,'field' ,'armchair' ,'seat' ,'fence' ,'desk' ,'rock' ,'wardrobe' ,'lamp' ,'bathtub' ,'railing' ,'cushion' ,'base' ,'box' ,'column' ,'signboard' ,'chest of drawers' ,'counter' ,'sand' ,'sink' ,'skyscraper' ,'fireplace' ,'refrigerator' ,'grandstand' ,'path' ,'stairs' ,'runway' ,'case' ,'pool table' ,'pillow' ,'screen door' ,'stairway' ,'river' ,'bridge' ,'bookcase' ,'blind' ,'coffee table' ,'toilet' ,'flower' ,'book' ,'hill' ,'bench' ,'countertop' ,'stove' ,'palm' ,'kitchen island' ,'computer' ,'swivel chair' ,'boat' ,'bar' ,'arcade machine' ,'hovel' ,'bus' ,'towel' ,'light' ,'truck' ,'tower' ,'chandelier' ,'awning' ,'streetlight' ,'booth' ,'television' ,'airplane' ,'dirt track' ,'apparel' ,'pole' ,'land' ,'bannister' ,'escalator' ,'ottoman' ,'bottle' ,'buffet' ,'poster' ,'stage' ,'van' ,'ship' ,'fountain' ,'conveyer belt' ,'canopy' ,'washer' ,'plaything' ,'swimming pool' ,'stool' ,'barrel' ,'basket' ,'waterfall' ,'tent' ,'bag' ,'minibike' ,'cradle' ,'oven' ,'ball' ,'food' ,'step' ,'tank' ,'trade name' ,'microwave' ,'pot' ,'animal' ,'bicycle' ,'lake' ,'dishwasher' ,'screen' ,'blanket' ,'sculpture' ,'hood' ,'sconce' ,'vase' ,'traffic light' ,'tray' ,'ashcan' ,'fan' ,'pier' ,'crt screen' ,'plate' ,'monitor' ,'bulletin board' ,'shower' ,'radiator' ,'glass' ,'clock' ,'flag'])
-
-global device0, matching
-global MatchData
-
-FrameData = {}
-MatchData = {}
-mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
-mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
-depthserver_addr    = "http://143.248.95.112:35005/depthestimate"
-semanticserver_addr = "http://143.248.95.112:35006/segment"
-nReferenceFrameID = -1;
-nLastDepthID = -1
-
-ConditionVariable = threading.Condition()
-ConditionVariable2 = threading.Condition()
-
-message = []
-ids = []
-
-depthImageQueue = []
-depthImgIDQueue = []
 
 app = Flask(__name__)
 # cors = CORS(app)
@@ -75,7 +52,6 @@ def work2(conv2, queue, queue2):
 
 def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
     print("Start Message Processing Thread")
-    global mappingserver_addr, FrameData
     while True:
         cv.acquire()
         cv.wait()
@@ -84,13 +60,14 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
         cv.release()
         ##### 처리 시작
         start = time.time()
-        #img_encoded = base64.b64decode(message['img'])
-
         img_array = np.frombuffer(message, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
         frame_tensor = frame2tensor(img, device0)
+
+        time1 = time.time()
         last_data = SuperPointAndGlue.superpoint({'image': frame_tensor})
+        time2 = time.time()
 
         kpts = last_data['keypoints'][0].cpu().detach().numpy()
         desc = last_data['descriptors'][0].cpu().detach().numpy()
@@ -105,10 +82,10 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
         Frame['rgb'] = message #인코딩된 바이트 형태
         n = len(kpts)
         ##mapping server에 전달
-
         FrameData[id] = Frame
-        requests.post(mappingserver_addr, ujson.dumps({'id': id, 'n': n}))
         end2 = time.time()
+        requests.post(mappingserver_addr, ujson.dumps({'id': id, 'n': n}))
+        end3 = time.time()
 
         dImgQueue.append(message)
         dIDQueue.append(id)
@@ -118,29 +95,46 @@ def work(cv, condition2, SuperPointAndGlue, queue, queue2, dImgQueue, dIDQueue):
 
         # thtemp =  threading.Thread(target=supergluematch2, args=(SuperPointAndGlue, id))
         # thtemp.start()
-        print("Message Processing = %d : %d : %f %f %d" % (id, len(FrameData), end2 - start, end2 - end1, len(queue)))
+        print("Message Processing = %d : %d : %f : %f : %f %f %f %d" % (id, len(FrameData), time1-start, time2-time1, end1 - time2, end2 - end1, end3-end2, len(queue)))
     print("End Message Processing Thread")
 
 def supergluematch2(SuperGlue, id):
-    global FrameData, nReferenceFrameID
     start = time.time()
-    data1 = keyframe2tensor(FrameData[id], device0, '0')
-    data2 = keyframe2tensor(FrameData[nReferenceFrameID], device0, '1')
-    pred = matching({**data1, **data2})
-    matches0 = pred['matches0'][0].cpu().numpy()
-    end = time.time()
-    print("SuperGlue = %f %d" % (end - start, len(matches0)))
+    #data1 = keyframe2tensor(FrameData[id], device0, '0')
+    #data2 = keyframe2tensor(FrameData[nReferenceFrameID], device0, '1')
+    #pred = matching({**data1, **data2})
+    #matches0 = pred['matches0'][0].cpu().numpy()
+    #end = time.time()
+    #print("SuperGlue = %f %d" % (end - start, len(matches0)))
 
 #######################################################
-@app.route("/Connect", methods=['GET'])
+@app.route("/Connect", methods=['POST'])
 def Connect():
-    fx = request.args.get('fx')
-    print("fx = "+(fx))
+    data = ujson.loads(request.data)
+    id = data['userID']
+    map = data['mapName']
+    bMapping = data['bMapping']
+    cameraParam = np.array([[data['fx'], 0.0, data['cx']],[0.0, data['fy'], data['cy']],[0.0,0.0,0.0]], dtype = np.float32)
+    imgSize = np.array([data['h'], data['w']])
+    user = User(id, map, bMapping, cameraParam, imgSize)
+    """
+    user.id
+    user['map'] = map
+    user['mapping'] = bMapping
+    user['camera'] = cameraParam
+    user['image'] = imgSize
+    """
+    UserData[user.id] = user
+    if MapData.get(map) is None:
+        MapData[map] = Map(map)
+
+    #print('Connect %s'%(user))
+    print('Connect Num = %d'%(len(UserData)))
+    print('Connect Map = %s'%(MapData[map].name))
     return ""
 
 @app.route("/SaveMap", methods=['POST'])
 def SaveMap():
-    global FrameData
     idx = 0
     total = 0
     keys = []
@@ -168,10 +162,8 @@ def SaveMap():
     f.close()
     return ujson.dumps({'id': 0})
 
-
 @app.route("/LoadMap", methods=['POST'])
 def LoadMap():
-    global FrameData
     f = open('./map/map.bin', 'rb')
     data = f.read().decode()
     f.close()
@@ -191,26 +183,33 @@ def LoadMap():
     """
     return ujson.dumps({'id': 0})
 
-
+"""
 @app.route("/SetReferenceFrameID", methods=['POST'])
 def SetReferenceFrameID():
-    global nReferenceFrameID
     params = ujson.loads(request.data)
     id = int(params['id'])
     nReferenceFrameID = id
     # print("Set Reference Frame ID = %d"%(nReferenceFrameID))
     return ujson.dumps({'id': id})
 
-
 @app.route("/GetReferenceFrameID", methods=['POST'])
 def GetReferenceFrameID():
-    global nReferenceFrameID
     # print("Get Reference Frame ID = %d" % (nReferenceFrameID))
     return ujson.dumps({'n': nReferenceFrameID})
 
 @app.route("/GetLastDepthFrameID", methods=['POST'])
 def GetLastDepthFrameID():
     return ujson.dumps({'id': nLastDepthID})
+"""
+@app.route("/GetLastFrameID", methods=['POST'])
+def GetLastFrameID():
+    return ujson.dumps({'n': UpdatedID[request.args.get('key')]})
+
+@app.route("/SetLastFrameID", methods=['POST'])
+def SetLastFrameID():
+    id = int(request.values.get('id'))
+    UpdatedID[request.values.get('key')] = id
+    return "a"
 
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
@@ -219,67 +218,31 @@ def ReceiveAndDetect():
     id = int(request.args.get('id'))
     end = time.time()
     print("Receive Time : %f = %d" % (end - start, id))
-    global message, ids
     ids.append(id)
-    message.append(request.data)
-    global ConditionVariable
+    messages.append(request.data)
 
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
-
-    """
-    img_encoded = base64.b64decode(params['img'])
-    width = int(params['w'])
-    height = int(params['h'])
-    channel = int(params['c'])
-
-    img_array = np.frombuffer(img_encoded, dtype=np.uint8)
-    img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-    img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
-    frame_tensor = frame2tensor(img, device0)
-    last_data = matching.superpoint({'image': frame_tensor})
-
-    kpts   = last_data['keypoints'][0].cpu().detach().numpy()
-    desc   = last_data['descriptors'][0].cpu().detach().numpy()
-    scores = last_data['scores'][0].cpu().detach().numpy()
-
-    #rgb인지 bgr인지 확인해야 함
-    Frame = {}
-    Frame['image'] = img
-    Frame['keypoints'] = kpts #last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
-    Frame['descriptors'] = desc #descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
-    Frame['scores'] = scores
-    Frame['rgb'] = img_cv
-    global FrameData
-    FrameData[id] = Frame
-    n = len(kpts)
-
-    ##mapping server에 전달
-    global mappingserver_addr
-    requests.post(mappingserver_addr,  ujson.dumps({'id':id,'n':n}))
-    return ujson.dumps({'id':id,'n':n})
-    """
     return ujson.dumps({'id': id})
 
 @app.route("/ReceiveData", methods=['POST'])
 def ReceiveData():
-    global FrameData, nLastDepthID
     id = int(request.args.get('id'))
     key = request.args.get('key')
     FrameData[id][key] = request.data
-    return ""
+    UpdatedID[key] = id
+    return "a"
 
 @app.route("/SendData", methods=['POST'])
 def SendData():
     id = int(request.args.get('id'))
     key = request.args.get('key')
-    data = FrameData[id][key]
+    data = FrameData[id][key] #이걸 전부 바이트로 변환???
     return data
 
 @app.route("/ReceiveDepth", methods=['POST'])
 def ReceiveDepth():
-    global FrameData, nLastDepthID
     id = int(request.args.get('id'))
     FrameData[id]['bdepth'] = request.data
 
@@ -295,44 +258,17 @@ def ReceiveDepth():
     cv2.imwrite("depth.jpg", depth)
     FrameData[id]['depth'] = depth
     FrameData[id]['bdepth'] = bytes(depth)
-    print("Depth Map Update = %d"%(nLastDepthID))
+    #print("Depth Map Update = %d"%(nLastDepthID))
 
     nLastDepthID = id
     return ""
 
-@app.route("/ReceiveSegmentation", methods=['POST'])
-def ReceiveSegmentation():
-    global FrameData
-    id = int(request.args.get('id'))
-    FrameData[id]['segmentation'] = request.data
-    """
-    w = int(request.args.get('w'))
-    h = int(request.args.get('h'))
-    print('SEG data %d, %d %d'%(len(request.data), w, h))
-    iarray = np.frombuffer(request.data, dtype=np.uint8)
-    seg = iarray.reshape((h,w))
-    cv2.imwrite("seg.jpg", seg)
-    """
-    return ""
-
-@app.route("/SendDepth", methods=['POST'])
-def SendDepth():
-    id = int(request.args.get('id'))
-    data = FrameData[id]['bdepth']
-    """
-    if nLastDepthID != -1:
-        data = FrameData[nLastDepthID]['bdepth']
-    else:
-        data = bytes([])
-    """
-    return data#ujson.dumps({'id': nLastDepthID, 'depth':data})
 
 ########################################################
 @app.route("/sendimage", methods=['POST'])
 def sendimage():
     params = ujson.loads(request.data)
     id = int(params['id'])
-    global FrameData
     if id not in FrameData:
         print("Frame Error::id=%d" % (id))
     img = FrameData[id]['rgb']
@@ -345,7 +281,7 @@ def sendimage():
 @app.route("/receiveimage", methods=['POST'])
 def receiveimage():
     params = ujson.loads(request.data)
-    global FrameData
+
     img_encoded = base64.b64decode(params['img'])
     width = int(params['w'])
     height = int(params['h'])
@@ -383,8 +319,6 @@ def detect():
     params = ujson.loads(request.data)
     id = int(params['id'])
 
-    global device0
-    global FrameData
     if id not in FrameData:
         print("Frame Error::id=%d" % (id))
     Frame = FrameData[id]
@@ -434,7 +368,6 @@ def segment():
 
 @app.route("/depthestimate", methods=['POST'])
 def depthestimate():
-    global FrameData
     params = ujson.loads(request.data)
     id = int(params['id'])
 
@@ -470,10 +403,17 @@ def depthestimate():
 
 @app.route("/reset", methods=['POST'])
 def reset():
-    global FrameData, nLastDepthID, nReferenceFrameID
     FrameData = {}
-    nReferenceFrameID = -1
-    nLastDepthID = -1
+    messages = []
+    ids = []
+
+    depthImageQueue = []
+    depthImgIDQueue = []
+
+    UpdatedID = {};
+    for key in keys_updated_id:
+        UpdatedID[key] = -1
+
     json_data = ujson.dumps({'res': 0})
     print("Reset FrameData")
     return json_data
@@ -481,8 +421,6 @@ def reset():
 
 @app.route("/detectWithDesc", methods=['POST'])
 def detectWithDesc():
-    global device0
-    global FrameData  # , matchGlobalIDX
     # matchIDX = matchGlobalIDX
     # matchGlobalIDX = (matchGlobalIDX+1)%NUM_MAX_MATCH
     # print("Detect=Start=%d"% (matchIDX))
@@ -516,8 +454,6 @@ def detectWithDesc():
 
 @app.route("/detectOnlyPts", methods=['POST'])
 def detectOnlyPts():
-    global device0
-    global FrameData
 
     # start = time.time()
     params = ujson.loads(request.data)
@@ -547,14 +483,12 @@ def detectOnlyPts():
 
 @app.route("/getPts", methods=['POST'])
 def getPts():
-    global device0
-    global FrameData
     ##이것도 사용할 경우 n은 없애기
     ##이것만 요청하는 경우에는 속ㄷ고가 상당히 빠름. 0.006초 정도, 그렇다면 포인트도 분리한다면?
+
     params = ujson.loads(request.data)
     id = int(params['id'])
-    pts = FrameData[id][
-        'keypoints']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
+    pts = FrameData[id]['keypoints']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
     # res = str(base64.b64encode(pts))
     json_data = ujson.dumps({'pts': pts.tolist(), 'n': len(pts)})
     return json_data
@@ -562,8 +496,6 @@ def getPts():
 
 @app.route("/getDesc", methods=['POST'])
 def getDesc():
-    global device0
-    global FrameData
     ##이것만 요청하는 경우에는 속ㄷ고가 상당히 빠름. 0.006초 정도, 그렇다면 포인트도 분리한다면?
     ##이것은 받는쪽이나 보내는쪽에서 인코딩, 디코딩 하는 시간도 고려해야 한다는 것을 의미하는듯
     params = ujson.loads(request.data)
@@ -576,8 +508,6 @@ def getDesc():
 
 @app.route("/supergluematch", methods=['POST'])
 def supergluematch():
-    global device0, matching
-    global FrameData, MatchData  # , matchGlobalIDX#, prevID1, prevID2, data1, data2
     start = time.time()
     print("Match=Start")
     # matchIDX = matchGlobalIDX
@@ -714,7 +644,6 @@ if __name__ == "__main__":
         '--force_cpu', action='store_true',
         help='Force pytorch to run in CPU mode.')
 
-    global device0, matching
     opt = parser.parse_args()
     device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     # device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
@@ -769,9 +698,31 @@ if __name__ == "__main__":
         decoder_channels=256, decoder_atrous_rates=(12, 24, 36),
         in_channels=3, classes=1, activation=None, upsampling=4, aux_params=None).eval().to(device0)
     """
-    keys = ['keypoints', 'scores', 'descriptors']
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, message, ids, depthImageQueue, depthImgIDQueue))
+    UserData = {}
+    MapData = {}
+    FrameData = {}
+    MatchData = {}
+
+    mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
+    mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
+    depthserver_addr = "http://143.248.95.112:35005/depthestimate"
+    semanticserver_addr = "http://143.248.95.112:35006/segment"
+
+    ConditionVariable = threading.Condition()
+    ConditionVariable2 = threading.Condition()
+
+    messages = []
+    ids = []
+
+    depthImageQueue = []
+    depthImgIDQueue = []
+    keys_updated_id = ['bsegmentation', 'bdepth', 'reference']
+    UpdatedID = {};
+    for key in keys_updated_id:
+        UpdatedID[key] = -1
+
+    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, messages, ids, depthImageQueue, depthImgIDQueue))
     th1.start()
     th2 = threading.Thread(target=work2, args=(ConditionVariable2, depthImageQueue, depthImgIDQueue))
     th2.start()
