@@ -18,7 +18,7 @@ from superglue.matching import Matching
 from superglue.utils import (frame2tensor, keyframe2tensor)
 ##import super glue and super point
 ##################################################
-
+import pickle
 from module.User    import User
 from module.Map     import Map
 from module.Message import Message
@@ -36,22 +36,69 @@ app = Flask(__name__)
 # cors = CORS(app)
 # CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
+def work3(conv2, queue):
+    while True:
+        conv2.acquire()
+        conv2.wait()
+        start = time.time()
+        message = queue[-1]
+        conv2.release()
+        mapname = message.map
+        lastID = message.id
+
+        Frames = MapData[mapname].Frames
+        #Matches = MapData[mapname].Matches
+        #Matches[lastId] = {}
+        Frame = Frames[lastID]
+
+        #matchIDs =Frame['ids']
+        ids = Frames["ids"] #전체 프레임 리스트를 의미함
+        for id in ids:
+            desc1 = Frames[lastID]['descriptors'].transpose()
+            desc2 = Frames[id]['descriptors'].transpose()
+            matches = bf.knnMatch(desc1, desc2, k=2)
+            # matches  = flann.knnMatch(desc1, desc2, k=2)
+            good = np.empty((len(matches)), np.int32)
+            success = 0
+            for i, (m, n) in enumerate(matches):
+                # print("%d %d : %f %f"%(m.queryIdx, n.trainIdx, m.distance, n.distance))
+                if m.distance < 0.7 * n.distance:
+                    good[i] = m.trainIdx
+                    success = success + 1
+                else:
+                    good[i] = 10000
+            # match 정보 저장
+            #Matches[id2] = {}
+            #Matches[id2][id1] = matches1
+
+            # print("match %d %d = %d" % (lastId, id, success))
+            if success < 20:
+                break
+            #matchIDs.append(id)
+            strid = 'b'+str(id)
+            Frame[strid] = good
+        print("Match Frames %d, %d"%(lastID, len(ids)))
+        #Frame['bids'] = bytes(matchIDs)
+        #Frames["ids"].insert(0, message.id)
+
+
 ##work에서 호출하는 cv가 필요함.
+##다른 서버에 뿌리는 정보
 def work2(conv2, queue):
     print("Start Matching Thread")
     while True:
         conv2.acquire()
         conv2.wait()
         start = time.time()
-        message = queue.pop()
+        message = queue[-1]
         map = message.map
         conv2.release()
         lastID = message.id
-        print("Depth %d" % (lastID))
+
         requests.post(depthserver_addr+"?map="+map+"&id="+str(lastID), message.data)
         requests.post(semanticserver_addr+"?map="+map+"&id="+str(lastID), message.data)
 
-def work(condition1, condition2, SuperPointAndGlue, queue, queue2):
+def work1(condition1, condition2, SuperPointAndGlue, queue, queue2):
     print("Start Message Processing Thread")
     while True:
         condition1.acquire()
@@ -78,26 +125,28 @@ def work(condition1, condition2, SuperPointAndGlue, queue, queue2):
         Frame['image'] = img
         Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
         Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
+        Frame['scores'] = scores
         Frame['bkpts'] = kpts.tobytes()
         Frame['bdesc'] = desc.transpose().tobytes()
+        Frame['bimage'] = message.data #인코딩된 바이트 형태
 
-        Frame['scores'] = scores
-        Frame['rgb'] = message.data #인코딩된 바이트 형태
+        #Frame['ids'] = []
+        #Frame['bids'] = bytes([])
         n = len(kpts)
         ##mapping server에 전달
         MapData[message.map].Frames[message.id] = Frame
         end2 = time.time()
-        requests.post(mappingserver_addr, ujson.dumps({'id': message.id, 'map':message.map, 'n': n}))
+        requests.post(mappingserver_addr, ujson.dumps({'id': message.id, 'user': message.user}))
         end3 = time.time()
 
         queue2.append(message)
         condition2.acquire()
-        condition2.notify()
+        condition2.notifyAll()
         condition2.release()
 
         # thtemp =  threading.Thread(target=supergluematch2, args=(SuperPointAndGlue, id))
         # thtemp.start()
-        print("Message Processing = %s %d : %d : %f : " % (message.map, message.id, len(MapData[message.map].Frames), end3 - start))
+        #print("Message Processing = %s %d : %d : %f : " % (message.map, message.id, len(MapData[message.map].Frames), end3 - start))
         #print("Message Processing = %d : %d : %f : %f : %f %f %f %d" % (id, len(FrameData), time1-start, time2-time1, end1 - time2, end2 - end1, end3-end2, len(queue)))
     print("End Message Processing Thread")
 
@@ -123,7 +172,10 @@ def Connect():
         'cx':cx,
         'cy':cy,
         'w':w,
-        'h':h
+        'h':h,
+        'b':bMapping,
+        'n':map,
+        'u':id
     }))
 
     """
@@ -141,10 +193,17 @@ def Connect():
     print('Connect Num = %d'%(len(UserData)))
     print('Connect Map = %s'%(MapData[map].name))
     return ""
-
-
+@app.route("/Disconnect", methods=['POST'])
+def Disconnect():
+    user = request.args.get('userID')
+    print("Disconnect : "+UserData[user].id)
+    requests.post(mappingserver_addr0+"Disconnect", ujson.dumps({
+        'u': user
+    }))
+    return ""
 @app.route("/reset", methods=['POST'])
 def reset():
+    print("Reset")
     map = MapData[request.args.get('map')]
     map.reset()
     json_data = ujson.dumps({'res': 0})
@@ -152,6 +211,46 @@ def reset():
 
 @app.route("/SaveMap", methods=['POST'])
 def SaveMap():
+    data = ujson.loads(request.data)
+    mpids = np.frombuffer(base64.b64decode(data['ids']), dtype=np.int32)
+    x3ds = np.frombuffer(base64.b64decode(data['x3ds']), dtype=np.float32)
+    kfids = np.frombuffer(base64.b64decode(data['kfids']), dtype=np.int32)
+    poses = np.frombuffer(base64.b64decode(data['poses']), dtype=np.float32)
+    mpidxs = np.frombuffer(base64.b64decode(data['idxs']), dtype=np.int32)
+
+    bmpids = mpids.tobytes()
+    bx3ds = x3ds.tobytes()
+    bkfids = kfids.tobytes()
+    bposes = poses.tobytes()
+    bmpidxs = mpidxs.tobytes()
+
+    mapname = request.args.get('map')
+    map = MapData[mapname]
+    map.MapPoints['bmpids'] = bmpids
+    map.MapPoints['bx3ds'] = bx3ds
+    map.Frames['bkfids'] = bkfids
+    map.Frames['bposes'] = bposes
+    map.Frames['bmpidxs'] = bmpidxs
+
+    for i in range(len(mpids)):
+        id = mpids[i]
+        mp = {}
+        mp['X3D']= x3ds[i*3:i*3+3]
+        map.MapPoints[id] = mp
+
+    sIDX = 0
+    for i in range(len(kfids)):
+        id = kfids[i]
+        map.Frames[id]["pose"] = poses[i*12:i*12+12].tolist()
+        n = len(map.Frames[id]["keypoints"])
+        eIDX = sIDX+n
+        map.Frames[id]["mappoints"] = mpidxs[sIDX:eIDX].tolist()
+        sIDX = eIDX
+
+    #for id in kfids:
+    #    map.Frames[id]["pose"]
+    pickle.dump(map, open('./map/'+mapname+'.bin', "wb"))
+
     """
     idx = 0
     total = 0
@@ -183,13 +282,21 @@ def SaveMap():
 
 @app.route("/LoadMap", methods=['POST'])
 def LoadMap():
-    f = open('./map/map.bin', 'rb')
+    mapname = request.args.get('map')
+    f = open('./map/'+mapname+'.bin', 'rb')
+    map = pickle.load(f)
+    f.close()
+    MapData[mapname] = map
+    print(len(MapData[mapname].Frames))
+    requests.post(mappingserver_addr2, ujson.dumps({'map': mapname}))
+    """
     data = f.read().decode()
     f.close()
     DATA = ujson.loads(data)
     n = DATA['total']
     print("LoadMap %d" % (n))
     requests.post(mappingserver_addr2, ujson.dumps(DATA))
+    """
 
     """
     DATA = ujson.loads(data)
@@ -201,6 +308,14 @@ def LoadMap():
     n = DATA['total']
     """
     return ujson.dumps({'id': 0})
+
+def StartMap(mapname):
+    f = open('./map/'+mapname+'.bin', 'rb')
+    map = pickle.load(f)
+    f.close()
+    MapData[mapname] = map
+    print(len(MapData[mapname].Frames))
+    requests.post(mappingserver_addr2, "a")
 
 @app.route("/GetLastFrameID", methods=['POST'])
 def GetLastFrameID():
@@ -214,15 +329,27 @@ def SetLastFrameID():
     map.UpdateIDs[request.values.get('key')] = id
     return "a"
 
+@app.route("/AddKeyFrame", methods=['POST'])
+def AddKeyFrame():
+    map = MapData[request.args.get('map')]
+    id = int(request.values.get('id'))
+    attr = request.args.get('attr', 'Frames')
+    getattr(map, attr)["ids"].insert(0, id)    #.append(id)
+    return "a"
+
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
     start = time.time()
+    user = request.args.get('user')
     map = MapData[request.args.get('map')]
-    id = int(request.args.get('id'))
+    print(request.args.get('id'))
 
-    message = Message(map.name, id, request.data)
+
+    id = request.args.get('id')
+
+    message = Message(user, map.name, id, request.data)
     end = time.time()
-    print("Receive Time : %f = %d" % (end - start, id))
+    #print("Receive Time : %f = %d" % (end - start, id))
 
     messages.append(message)
 
@@ -231,25 +358,36 @@ def ReceiveAndDetect():
     ConditionVariable.release()
     return ujson.dumps({'id': id})
 
+"""
+##Send와 Receive를 자유롭게 이용하기 위해서는
+1) map 정보, 2)attr 정보(프레임인지, 맵포인트인지) 3)id 4)key : 해당 데이터의 attr
+다만, 맵포인트의 경우 이 함수로 정보를 변경하면 호출이 너무 많아짐..
+테스트가 필요함.
+"""
 @app.route("/ReceiveData", methods=['POST'])
 def ReceiveData():
     map = MapData[request.args.get('map')]
     id = int(request.args.get('id'))
     key = request.args.get('key')
-
-    map.Frames[id][key] = request.data
+    attr = request.args.get('attr', 'Frames')
+    getattr(map, attr)[id][key] = request.data
+    #map.Frames[id][key] = request.data
     map.UpdateIDs[key] = id
     return "a"
 
 @app.route("/SendData", methods=['POST'])
 def SendData():
     map = MapData[request.args.get('map')]
-    id = int(request.args.get('id'))
+    attr = request.args.get('attr', 'Frames')
+    id = int(request.args.get('id', -1))
     key = request.args.get('key')
-    print("senddata test %d"%(len(map.Frames)))
-    data = map.Frames[id][key] #이걸 전부 바이트로 변환???
-    return data
 
+    if id == -1:
+        data = getattr(map, attr)[key]
+    else:
+        data = getattr(map, attr)[id][key]
+    #data = map.Frames[id][key] #이걸 전부 바이트로 변환???
+    return data
 
 @app.route("/featurematch", methods=['POST'])
 def featurematch():
@@ -385,11 +523,15 @@ if __name__ == "__main__":
         description='WISE UI Web Server',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        '--ip', type=str,
+        '--ip', type=str, default='0.0.0.0',
         help='ip address')
     parser.add_argument(
         '--port', type=int, default=35005,
         help='port number')
+
+    parser.add_argument(
+        '--MAP', type=str,
+        help='load map name')
 
     # super glue and point
     parser.add_argument(
@@ -498,6 +640,7 @@ if __name__ == "__main__":
     UserData = {}
     MapData = {}
 
+    mappingserver_addr0 = "http://143.248.96.81:35006/"
     mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
     mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
     mappingserver_connect = "http://143.248.96.81:35006/connect"
@@ -510,11 +653,15 @@ if __name__ == "__main__":
     messages = []
     messages2 = []
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, ConditionVariable2, matching, messages, messages2))
+    if opt.MAP:
+        StartMap(opt.MAP)
+
+    th1 = threading.Thread(target=work1, args=(ConditionVariable, ConditionVariable2, matching, messages, messages2))
     th1.start()
     th2 = threading.Thread(target=work2, args=(ConditionVariable2, messages2))
     th2.start()
-    # th1.join()
+    th3 = threading.Thread(target=work3, args=(ConditionVariable2, messages2))
+    th3.start()
 
     print('Starting the API')
     # app.run(host=opt.ip, port=opt.port)

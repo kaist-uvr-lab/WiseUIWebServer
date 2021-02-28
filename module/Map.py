@@ -10,3 +10,7 @@ class Map:
             self.UpdateIDs[key] = -1
         self.Frames = {}
         self.MapPoints = {}
+        self.Matches = {}
+        self.Frames["ids"] = []
+        self.MapPoints["ids"] = []
+        self.Matches["ids"] = []
