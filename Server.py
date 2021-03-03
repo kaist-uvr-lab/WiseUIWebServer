@@ -129,12 +129,11 @@ def work1(condition1, condition2, SuperPointAndGlue, queue, queue2):
         Frame['bkpts'] = kpts.tobytes()
         Frame['bdesc'] = desc.transpose().tobytes()
         Frame['bimage'] = message.data #인코딩된 바이트 형태
-
-        #Frame['ids'] = []
-        #Frame['bids'] = bytes([])
+        MapData[message.map].AddFrame(message.timestamp, Frame)
+        message.id = MapData[message.map].IDs[message.timestamp]
         n = len(kpts)
         ##mapping server에 전달
-        MapData[message.map].Frames[message.id] = Frame
+        #MapData[message.map].Frames[message.id] = Frame
         end2 = time.time()
         requests.post(mappingserver_addr, ujson.dumps({'id': message.id, 'user': message.user}))
         end3 = time.time()
@@ -165,7 +164,7 @@ def Connect():
     h = data['h']
     cameraParam = np.array([[fx, 0.0, cx],[0.0, fy, cy],[0.0,0.0,1.0]], dtype = np.float32)
     imgSize = np.array([h, w])
-    user = User(id, map, bMapping, cameraParam, imgSize)
+
     requests.post(mappingserver_connect, ujson.dumps({
         'fx':fx,
         'fy':fy,
@@ -185,13 +184,19 @@ def Connect():
     user['camera'] = cameraParam
     user['image'] = imgSize
     """
-    UserData[user.id] = user
+    if UserData.get(id) is None:
+        user = User(id, map, bMapping, cameraParam, imgSize)
+        UserData[user.id] = user
+        print('Connect Num = %d' % (len(UserData)))
+        #print('Connect Map = %s %s' % (UserData[user.id].id, MapData[map].name))
+    else:
+        user = UserData[id]
+        print('Connect Num = %d' % (len(UserData)))
     if MapData.get(map) is None:
         MapData[map] = Map(map)
 
     #print('Connect %s'%(user))
-    print('Connect Num = %d'%(len(UserData)))
-    print('Connect Map = %s'%(MapData[map].name))
+
     return ""
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
@@ -337,15 +342,22 @@ def AddKeyFrame():
     getattr(map, attr)["ids"].insert(0, id)    #.append(id)
     return "a"
 
+@app.route("/ReceiveTrackingData", methods=['POST'])
+def ReceiveTrackingData():
+    id = int(request.values.get('id'))
+    #map = MapData[request.args.get('map')]
+    #attr = request.args.get('attr', 'Frames')
+    #getattr(map, attr)["ids"].insert(0, id)    #.append(id)
+    print("Tracking %d"%(id))
+    return "a"
+
+
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
     start = time.time()
     user = request.args.get('user')
     map = MapData[request.args.get('map')]
-    print(request.args.get('id'))
-
-
-    id = request.args.get('id')
+    id = request.args.get('id') #string
 
     message = Message(user, map.name, id, request.data)
     end = time.time()
@@ -357,6 +369,29 @@ def ReceiveAndDetect():
     ConditionVariable.notify()
     ConditionVariable.release()
     return ujson.dumps({'id': id})
+
+####단말에 전송할 데이터 관련 함수
+@app.route("/ReceiveFrameID", methods=['POST'])
+def ReceiveFrameID():
+    userID = request.args.get('user')
+    id = int(request.args.get('id'))
+    user = UserData[userID]
+    user.frameIDs.insert(0, id)
+    return ''
+@app.route("/SendFrameID", methods=['POST'])
+def SendFrameID():
+    userID = request.args.get('user')
+    map = MapData[request.args.get('map')]
+    user = UserData[userID]
+    id = user.frameIDs[0]
+    ts = map.TimeStamps[id]
+    """
+    if id is not -1:
+        ts = map.TimeStamps[id]
+    else:
+        ts = "invalid"
+    """
+    return ujson.dumps({'id':id, 'ts':ts})
 
 """
 ##Send와 Receive를 자유롭게 이용하기 위해서는
@@ -412,7 +447,7 @@ def featurematch():
     # print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
     # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
     # res = str(base64.b64encode(good))
-    return ujson.dumps({'matches': good.tolist()})
+    return good.tobytes()#ujson.dumps({'matches': good.tolist()})
 ########################################################
 
 
@@ -561,7 +596,7 @@ if __name__ == "__main__":
         '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
         help='SuperGlue weights')
     parser.add_argument(
-        '--max_keypoints', type=int, default=300,
+        '--max_keypoints', type=int, default=500,
         help='Maximum number of keypoints detected by Superpoint'
              ' (\'-1\' keeps all keypoints)')
     parser.add_argument(
@@ -660,8 +695,8 @@ if __name__ == "__main__":
     th1.start()
     th2 = threading.Thread(target=work2, args=(ConditionVariable2, messages2))
     th2.start()
-    th3 = threading.Thread(target=work3, args=(ConditionVariable2, messages2))
-    th3.start()
+    #th3 = threading.Thread(target=work3, args=(ConditionVariable2, messages2))
+    #th3.start()
 
     print('Starting the API')
     # app.run(host=opt.ip, port=opt.port)
