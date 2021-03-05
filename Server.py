@@ -115,22 +115,25 @@ def work1(condition1, condition2, SuperPointAndGlue, queue, queue2):
         time1 = time.time()
         last_data = SuperPointAndGlue.superpoint({'image': frame_tensor})
         time2 = time.time()
-
-        kpts = last_data['keypoints'][0].cpu().detach().numpy()
         desc = last_data['descriptors'][0].cpu().detach().numpy()
-        scores = last_data['scores'][0].cpu().detach().numpy()
+        kpts = last_data['keypoints'][0].cpu().detach().numpy()
+        #scores = last_data['scores'][0].cpu().detach().numpy()
         end1 = time.time()
 
+        user = UserData[message.user]
         Frame = {}
-        Frame['image'] = img
-        Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
         Frame['descriptors'] = desc  # descriptor를 미리 트랜스 포즈하고나서 수퍼글루를 더 적게 쓰면 그 때만 트랜스 포즈 하도록 하게 하자.
-        Frame['scores'] = scores
         Frame['bkpts'] = kpts.tobytes()
         Frame['bdesc'] = desc.transpose().tobytes()
         Frame['bimage'] = message.data #인코딩된 바이트 형태
-        MapData[message.map].AddFrame(message.timestamp, Frame)
-        message.id = MapData[message.map].IDs[message.timestamp]
+        Frame['binfo'] = user.info
+        #Frame['image'] = img
+        #Frame['scores'] = scores
+        #Frame['keypoints'] = kpts  # last_data['keypoints'][0].cpu().detach().numpy() #에러가능성
+        ##id 관리 및 user 정보에 추가
+        lastid = MapData[message.map].AddFrame(Frame)
+        user.AddData(lastid, message.timestamp)
+        message.id = lastid
         n = len(kpts)
         ##mapping server에 전달
         #MapData[message.map].Frames[message.id] = Frame
@@ -162,9 +165,7 @@ def Connect():
     cy = data['cy']
     w = data['w']
     h = data['h']
-    cameraParam = np.array([[fx, 0.0, cx],[0.0, fy, cy],[0.0,0.0,1.0]], dtype = np.float32)
-    imgSize = np.array([h, w])
-
+    info = np.array([fx, fy, cx, cy, w, h], dtype=np.float32).tobytes()
     requests.post(mappingserver_connect, ujson.dumps({
         'fx':fx,
         'fy':fy,
@@ -185,7 +186,7 @@ def Connect():
     user['image'] = imgSize
     """
     if UserData.get(id) is None:
-        user = User(id, map, bMapping, cameraParam, imgSize)
+        user = User(id, map, bMapping, fx, fy, cx, cy, w, h, info)#cameraParam, imgSize)
         UserData[user.id] = user
         print('Connect Num = %d' % (len(UserData)))
         #print('Connect Map = %s %s' % (UserData[user.id].id, MapData[map].name))
@@ -234,23 +235,27 @@ def SaveMap():
     map.MapPoints['bmpids'] = bmpids
     map.MapPoints['bx3ds'] = bx3ds
     map.Frames['bkfids'] = bkfids
-    map.Frames['bposes'] = bposes
-    map.Frames['bmpidxs'] = bmpidxs
 
+    #map.Frames['bposes'] = bposes
+    #map.Frames['bmpidxs'] = bmpidxs
+    """
     for i in range(len(mpids)):
         id = mpids[i]
         mp = {}
         mp['X3D']= x3ds[i*3:i*3+3]
         map.MapPoints[id] = mp
-
+    """
     sIDX = 0
     for i in range(len(kfids)):
         id = kfids[i]
-        map.Frames[id]["pose"] = poses[i*12:i*12+12].tolist()
-        n = len(map.Frames[id]["keypoints"])
+        map.Frames[id]["bpose"] = poses[i*12:i*12+12].tobytes()
+        n = len(map.Frames[id]["descriptors"][0])
         eIDX = sIDX+n
-        map.Frames[id]["mappoints"] = mpidxs[sIDX:eIDX].tolist()
+        map.Frames[id]["bmpidx"] = mpidxs[sIDX:eIDX].tobytes()
+
+        print("save %d %d"%(n, len(mpidxs[sIDX:eIDX])))
         sIDX = eIDX
+
 
     #for id in kfids:
     #    map.Frames[id]["pose"]
@@ -381,10 +386,10 @@ def ReceiveFrameID():
 @app.route("/SendFrameID", methods=['POST'])
 def SendFrameID():
     userID = request.args.get('user')
-    map = MapData[request.args.get('map')]
+    #map = MapData[request.args.get('map')]
     user = UserData[userID]
     id = user.frameIDs[0]
-    ts = map.TimeStamps[id]
+    ts = user.TimeStamps[id]
     """
     if id is not -1:
         ts = map.TimeStamps[id]
