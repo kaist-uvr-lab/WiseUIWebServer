@@ -81,10 +81,10 @@ if __name__ == "__main__":
         description='WISE UI Web Server',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        '--ip', type=str,
+        '--ip', type=str,default='0.0.0.0',
         help='ip address')
     parser.add_argument(
-        '--port', type=int, default=35005,
+        '--port', type=int, default=35006,
         help='port number')
     parser.add_argument(
         '--use_gpu', type=str, default='3',
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     maps = []
     datas = []
     ids = []
-    pointserver_addr = "http://143.248.96.81:35005/ReceiveData"
+    pointserver_addr = "http://143.248.6.143:35005/ReceiveData"#96.81
     ConditionVariable = threading.Condition()
 
     th1 = threading.Thread(target=work, args=(ConditionVariable,maps, ids, datas, pointserver_addr))
