@@ -87,7 +87,13 @@ if __name__ == "__main__":
         '--port', type=int, default=35006,
         help='port number')
     parser.add_argument(
-        '--use_gpu', type=str, default='3',
+        '--FACADE_SERVER', type=str,
+        help='ip address')
+    parser.add_argument(
+        '--use_gpu', type=str, default='0',
+        help='port number')
+    parser.add_argument(
+        '--FACADE_SERVER_ADDR', type=str,
         help='port number')
 
     opt = parser.parse_args()
@@ -103,10 +109,11 @@ if __name__ == "__main__":
     maps = []
     datas = []
     ids = []
-    pointserver_addr = "http://143.248.6.143:35005/ReceiveData"#96.81
+    FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
+    facadeserver_addr = FACADE_SERVER_ADDR + '/ReceiveData'
     ConditionVariable = threading.Condition()
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable,maps, ids, datas, pointserver_addr))
+    th1 = threading.Thread(target=work, args=(ConditionVariable,maps, ids, datas, facadeserver_addr))
     th1.start()
 
     print('Starting the API')
