@@ -4,7 +4,6 @@ import threading
 import ujson
 import time
 import numpy as np
-from PIL import Image
 from flask import Flask, request
 import requests
 from flask_cors import CORS
@@ -203,7 +202,7 @@ def Connect():
 def Disconnect():
     user = request.args.get('userID')
     print("Disconnect : "+UserData[user].id)
-    requests.post(mappingserver_addr0+"Disconnect", ujson.dumps({
+    requests.post(SLAM_SERVER_ADDR+"/Disconnect", ujson.dumps({
         'u': user
     }))
     return ""
@@ -570,6 +569,18 @@ if __name__ == "__main__":
         help='port number')
 
     parser.add_argument(
+        '--SLAM_SERVER', type=str,
+        help='http://xxx.xxx.xxx.xxx:xxxx')
+
+    parser.add_argument(
+        '--DEPTH_SERVER', type=str,
+        help='http://xxx.xxx.xxx.xxx:xxxx')
+
+    parser.add_argument(
+    '--SEGMENTATION_SERVER', type=str,
+        help='http://xxx.xxx.xxx.xxx:xxxx')
+
+    parser.add_argument(
         '--MAP', type=str,
         help='load map name')
 
@@ -633,12 +644,13 @@ if __name__ == "__main__":
     # device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
 
     ###LOAD MIDAS
+    """
     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
     midas.to(device0)
     midas.eval()
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.default_transform
-
+    """
     ##LOAD SuperGlue & SuperPoint
     if len(opt.resize) == 2 and opt.resize[1] == -1:
         opt.resize = opt.resize[0:1]
@@ -680,12 +692,14 @@ if __name__ == "__main__":
     UserData = {}
     MapData = {}
 
-    mappingserver_addr0 = "http://143.248.96.81:35006/"
-    mappingserver_addr = "http://143.248.96.81:35006/NotifyNewFrame"
-    mappingserver_addr2 = "http://143.248.96.81:35006/ReceiveMapData"
-    mappingserver_connect = "http://143.248.96.81:35006/connect"
-    depthserver_addr = "http://143.248.95.112:35005/depthestimate"
-    semanticserver_addr = "http://143.248.95.112:35006/segment"
+    SLAM_SERVER_ADDR = opt.SLAM_SERVER
+    DEPTH_SERVER_ADDR = opt.DEPTH_SERVER
+    SEGMENTATION_SERVER_ADDR = opt.SEGMENTATION_SERVER
+    mappingserver_addr = SLAM_SERVER_ADDR+'/NotifyNewFrame'
+    mappingserver_addr2 = SLAM_SERVER_ADDR+'/ReceiveMapData'
+    mappingserver_connect = SLAM_SERVER_ADDR+'/connect'
+    depthserver_addr = DEPTH_SERVER_ADDR+'/depthestimate'#95.112, #6.143
+    semanticserver_addr = SEGMENTATION_SERVER_ADDR+'/segment'
 
     ConditionVariable = threading.Condition()
     ConditionVariable2 = threading.Condition()
