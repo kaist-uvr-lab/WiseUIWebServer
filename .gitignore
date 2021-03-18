@@ -1,2 +1,8 @@
+<<<<<<< HEAD
 *.pyc
 .idea/*.xml
+=======
+.idea/*.xml
+*.pyc
+module/__pycache__
+>>>>>>> PreprocessingServer

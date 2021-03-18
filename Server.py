@@ -5,7 +5,7 @@ import numpy as np
 from flask import Flask, request
 import requests
 import cv2
-
+from module.Message import Message
 import argparse
 import torch
 
@@ -24,19 +24,18 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 #work에서 호출하는 cv가 필요함.
-def work(cv,  mapqueue, framequeue, dataqueue, addr):
+def work(cv,  queue):
     print("Start Message Processing Thread")
     while True:
         cv.acquire()
         cv.wait()
-        map = mapqueue.pop()
-        id = framequeue.pop()
-        data = dataqueue.pop()
+        message = queue.pop()
         cv.release()
         # 처리 시작
+
         start = time.time()
 
-        img_array = np.frombuffer(data, dtype=np.uint8)
+        img_array = np.frombuffer(message.data, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
         frame_tensor = frame2tensor(img, device)
@@ -46,16 +45,24 @@ def work(cv,  mapqueue, framequeue, dataqueue, addr):
         kpts = last_data['keypoints'][0].cpu().detach().numpy()
         # scores = last_data['scores'][0].cpu().detach().numpy()
 
-        requests.post(addr + "?map=" + map + "&id="+id+"&key=bkpst", kpts.tobytes())
-        requests.post(addr + "?map=" + map + "&id=" + id + "&key=bdesc", desc.transpose().tobytes())
+        requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bkpts",kpts.tobytes())
+        requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdesc",desc.transpose().tobytes())
+        requests.post(PROCESS_SERVER_ADDR + "/notify",
+                      ujson.dumps({'user': message.user, 'map': message.map, 'id': message.id, 'key': 'bkpts'}))
         end = time.time()
-        print("Super Point Processing = %s : %f : %d"%(id, end-start, len(dataqueue)))
+        print("Super Point Processing = %s : %f : %d"%(id, end-start, len(queue)))
+
+        # processing end
+
+
 
 @app.route("/Receive", methods=['POST'])
 def Receive():
-    maps.append(request.args.get('map'))
-    ids.append(request.args.get('id'))
-    datas.append(request.data)
+    user = request.args.get('user')
+    map = request.args.get('map')
+    id = request.args.get('id')
+    message = Message(user, map, id, request.data)
+    queue.append(message)
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
@@ -84,6 +91,9 @@ if __name__ == "__main__":
     parser.add_argument(
         '--FACADE_SERVER_ADDR', type=str,
         help='facade server address')
+    parser.add_argument(
+        '--PROCESS_SERVER_ADDR', type=str,
+        help='process server address')
 
     # super glue and point
     parser.add_argument(
@@ -171,14 +181,12 @@ if __name__ == "__main__":
     }
     matching = Matching(config).eval().to(device)
 
-    maps = []
-    datas = []
-    ids = []
+    queue = []
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
-    facadeserver_addr = FACADE_SERVER_ADDR + '/ReceiveData'
+    PROCESS_SERVER_ADDR = opt.PROCESS_SERVER_ADDR
     ConditionVariable = threading.Condition()
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable,maps, ids, datas, facadeserver_addr))
+    th1 = threading.Thread(target=work, args=(ConditionVariable, queue))
     th1.start()
 
     print('Starting the API')
