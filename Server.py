@@ -82,6 +82,20 @@ def work3(conv2, queue):
         #Frames["ids"].insert(0, message.id)
 
 
+class DataMessenger(threading.Thread):
+    def __init__(self, addr):
+        threading.Thread.__init__(self)
+        self.addr = addr
+        self.bdata = False
+    def setData(self, addr2, data):
+        self.addr2 = addr2
+        self.data = data
+        self.bdata = True
+    def run(self):
+        if self.bdata:
+            requests.post(self.addr + self.addr2, self.data)
+            self.bdata = False
+
 ##work에서 호출하는 cv가 필요함.
 ##다른 서버에 뿌리는 정보
 def work2(conv2, queue):
@@ -95,7 +109,11 @@ def work2(conv2, queue):
         conv2.release()
         lastID = message.id
 
-        requests.post(depthserver_addr+"?map="+map+"&id="+str(lastID), message.data)
+        addr2 = "?map="+map+"&id="+str(lastID)
+        for messenger in PreprocessingServerList:
+            messenger.setData(addr2, message.data)
+            messenger.run()
+        #requests.post(depthserver_addr+addr2, message.data)
         #requests.post(semanticserver_addr+"?map="+map+"&id="+str(lastID), message.data)
 
 def work1(condition1, condition2, SuperPointAndGlue, queue, queue2):
@@ -153,8 +171,27 @@ def work1(condition1, condition2, SuperPointAndGlue, queue, queue2):
     print("End Message Processing Thread")
 
 #######################################################
+@app.route("/ConnectServer", methods=['POST'])
+def ConnectServer():
+    #print(request.remote_addr)
+    #print(request.environ['REMOTE_PORT'])
+    data = ujson.loads(request.data)
+    port = data['port']
+    datakey = data['key']
+    addr = 'http://'+request.remote_addr+':'+str(port)+'/Receive'
+    #print("%s %s"%(addr, datakey))
+
+    t = DataMessenger(addr)
+    t.start()
+    PreprocessingServerList.append(t)
+    return ''
+
 @app.route("/Connect", methods=['POST'])
 def Connect():
+    print(request.remote_user)
+    print(request.remote_addr)
+    print(request.environ['REMOTE_PORT'])
+
     data = ujson.loads(request.data)
     id = data['userID']
     map = data['mapName']
@@ -698,6 +735,9 @@ if __name__ == "__main__":
 
     messages = []
     messages2 = []
+
+    ##Preprocessing Server
+    PreprocessingServerList = []
 
     if opt.MAP:
         StartMap(opt.MAP)
