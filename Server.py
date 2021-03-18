@@ -2,41 +2,35 @@ import threading
 import ujson
 import time
 import numpy as np
-from PIL import Image
 from flask import Flask, request
 import requests
-from flask_cors import CORS
-import base64
 import cv2
 
 import argparse
 import torch
 
-####WSGI
+#WSGI
 from gevent.pywsgi import WSGIServer
-from gevent import monkey
 
 ##################################################
 # API part
 ##################################################
 
-
 app = Flask(__name__)
 #cors = CORS(app)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
-##work에서 호출하는 cv가 필요함.
-
-def work(cv,  mapQueue, frameQueue, dataQueue, addr):
+#work에서 호출하는 cv가 필요함.
+def work(cv,  mapqueue, framequeue, dataqueue, addr):
     print("Start Message Processing Thread")
     while True:
         cv.acquire()
         cv.wait()
-        map = mapQueue.pop()
-        id = frameQueue.pop()
-        data = dataQueue.pop()
+        map = mapqueue.pop()
+        id = framequeue.pop()
+        data = dataqueue.pop()
         cv.release()
-        ##### 처리 시작
+        # 처리 시작
         start = time.time()
         img_array = np.frombuffer(data, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -50,24 +44,19 @@ def work(cv,  mapQueue, frameQueue, dataQueue, addr):
                 align_corners=False,
             ).squeeze().cpu().numpy()
 
-        h = prediction.shape[0]
-        w = prediction.shape[1]
-
-        #res = base64.b64encode(prediction).decode('ascii')
-        requests.post(addr + "?map=" + map + "&id="+id+"&key=bdepth", bytes(prediction))
+        requests.post(addr + "?map=" + map + "&id="+id+"&key="+keyword, bytes(prediction))
         end = time.time()
-        print("Depth Processing = %s : %f : %d"%(id, end-start, len(dataQueue)))
-    print("End Message Processing Thread")
+        print("Depth Processing = %s : %f : %d"%(id, end-start, len(dataqueue)))
 
-@app.route("/depthestimate", methods=['POST'])
-def depthestimate():
+@app.route("/Receive", methods=['POST'])
+def Receive():
     maps.append(request.args.get('map'))
     ids.append(request.args.get('id'))
     datas.append(request.data)
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
-    return "" #ujson.dumps({'id':0})
+    return ""
 
 ##################################################
 # END API part
@@ -87,14 +76,11 @@ if __name__ == "__main__":
         '--port', type=int, default=35006,
         help='port number')
     parser.add_argument(
-        '--FACADE_SERVER', type=str,
-        help='ip address')
-    parser.add_argument(
         '--use_gpu', type=str, default='0',
         help='port number')
     parser.add_argument(
         '--FACADE_SERVER_ADDR', type=str,
-        help='port number')
+        help='facade server address')
 
     opt = parser.parse_args()
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
@@ -119,6 +105,12 @@ if __name__ == "__main__":
     print('Starting the API')
     #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
+
+    keyword = 'bdepth'
+    requests.post(FACADE_SERVER_ADDR + "/ConnectServer", ujson.dumps({
+        'port':opt.port,'key': keyword
+    }))
+
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
     http.serve_forever()
 
