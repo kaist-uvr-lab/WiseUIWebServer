@@ -21,7 +21,7 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 #work에서 호출하는 cv가 필요함.
-def work(cv,  queue, addr):
+def work(cv,  queue):
     print("Start Message Processing Thread")
     while True:
         cv.acquire()
@@ -31,7 +31,7 @@ def work(cv,  queue, addr):
         # 처리 시작
 
         # processing end
-        
+
 
 @app.route("/Receive", methods=['POST'])
 def Receive():
@@ -85,10 +85,9 @@ if __name__ == "__main__":
     queue = []
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
     PROCESS_SERVER_ADDR = opt.PROCESS_SERVER_ADDR
-    facadeserver_addr = FACADE_SERVER_ADDR + '/ReceiveData'
     ConditionVariable = threading.Condition()
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, queue, facadeserver_addr))
+    th1 = threading.Thread(target=work, args=(ConditionVariable, queue))
     th1.start()
 
     print('Starting the API')
