@@ -106,7 +106,7 @@ if __name__ == "__main__":
     #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
 
-    keyword = 'bdepth'
+    keyword = 'depth'
     requests.post(FACADE_SERVER_ADDR + "/ConnectServer", ujson.dumps({
         'port':opt.port,'key': keyword
     }))
