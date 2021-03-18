@@ -73,7 +73,7 @@ if __name__ == "__main__":
         '--ip', type=str,default='0.0.0.0',
         help='ip address')
     parser.add_argument(
-        '--port', type=int, default=35006,
+        '--port', type=int, default=35007,
         help='port number')
     parser.add_argument(
         '--use_gpu', type=str, default='0',
