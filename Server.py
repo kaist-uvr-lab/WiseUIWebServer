@@ -41,18 +41,15 @@ def work(cv,  mapqueue, framequeue, dataqueue, addr):
         img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
         frame_tensor = frame2tensor(img, device)
 
-        time1 = time.time()
         last_data = matching.superpoint({'image': frame_tensor})
-        time2 = time.time()
         desc = last_data['descriptors'][0].cpu().detach().numpy()
         kpts = last_data['keypoints'][0].cpu().detach().numpy()
         # scores = last_data['scores'][0].cpu().detach().numpy()
-        end1 = time.time()
 
         requests.post(addr + "?map=" + map + "&id="+id+"&key=bkpst", kpts.tobytes())
         requests.post(addr + "?map=" + map + "&id=" + id + "&key=bdesc", desc.transpose().tobytes())
         end = time.time()
-        print("Depth Processing = %s : %f : %d"%(id, end-start, len(dataqueue)))
+        print("Super Point Processing = %s : %f : %d"%(id, end-start, len(dataqueue)))
 
 @app.route("/Receive", methods=['POST'])
 def Receive():
@@ -188,7 +185,7 @@ if __name__ == "__main__":
     #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
 
-    keyword = 'bdepth'
+    keyword = 'superpointandglue'
     requests.post(FACADE_SERVER_ADDR + "/ConnectServer", ujson.dumps({
         'port':opt.port,'key': keyword
     }))
