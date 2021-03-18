@@ -12,6 +12,7 @@ import cv2
 
 import argparse
 import torch
+import os
 
 from superglue.matching import Matching
 from superglue.utils import (frame2tensor, keyframe2tensor)
@@ -95,7 +96,7 @@ def work2(conv2, queue):
         lastID = message.id
 
         requests.post(depthserver_addr+"?map="+map+"&id="+str(lastID), message.data)
-        requests.post(semanticserver_addr+"?map="+map+"&id="+str(lastID), message.data)
+        #requests.post(semanticserver_addr+"?map="+map+"&id="+str(lastID), message.data)
 
 def work1(condition1, condition2, SuperPointAndGlue, queue, queue2):
     print("Start Message Processing Thread")
@@ -209,10 +210,18 @@ def Disconnect():
 @app.route("/reset", methods=['POST'])
 def reset():
     print("Reset")
+    mapname = request.args.get('map')
     map = MapData[request.args.get('map')]
     map.reset()
     json_data = ujson.dumps({'res': 0})
+    requests.post(SLAM_SERVER_ADDR + "/reset", ujson.dumps({'map': mapname}))
     return json_data
+
+@app.route("/RequestSaveMap", methods=['POST'])
+def RequestSaveMap():
+    mapname = request.args.get('map')
+    requests.post(mappingserver_addr3, ujson.dumps({'map': mapname}))
+    return ""
 
 @app.route("/SaveMap", methods=['POST'])
 def SaveMap():
@@ -258,8 +267,13 @@ def SaveMap():
 
     #for id in kfids:
     #    map.Frames[id]["pose"]
-    pickle.dump(map, open('./map/'+mapname+'.bin', "wb"))
 
+    fname = os.path.dirname(os.path.realpath(__file__))+'/map/'+mapname+'.bin'
+    #f = open(fname, 'w')
+    #f.close()
+    f = open(fname, "wb+")
+    pickle.dump(map, f)
+    f.close()
     """
     idx = 0
     total = 0
@@ -292,7 +306,8 @@ def SaveMap():
 @app.route("/LoadMap", methods=['POST'])
 def LoadMap():
     mapname = request.args.get('map')
-    f = open('./map/'+mapname+'.bin', 'rb')
+    fname = os.path.dirname(os.path.realpath(__file__)) + '/map/' + mapname + '.bin'
+    f = open(fname, 'rb')
     map = pickle.load(f)
     f.close()
     MapData[mapname] = map
@@ -447,6 +462,7 @@ def featurematch():
             success = success + 1
         else:
             good[i] = 10000
+    print("%d %d : %d"%(desc1.shape[0], desc2.shape[0], success))
     # print("match : id = %d, %d, res %d"%(id1, id2, success))
     # print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
     # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
@@ -478,31 +494,6 @@ def ReceiveDepth():
     """
     nLastDepthID = id
     return ""
-"""
-@app.route("/getPts", methods=['POST'])
-def getPts():
-    ##이것도 사용할 경우 n은 없애기
-    ##이것만 요청하는 경우에는 속ㄷ고가 상당히 빠름. 0.006초 정도, 그렇다면 포인트도 분리한다면?
-
-    map = MapData[request.args.get('map')]
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-    pts = FrameData[id]['keypoints']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
-    # res = str(base64.b64encode(pts))
-    json_data = ujson.dumps({'pts': pts.tolist(), 'n': len(pts)})
-    return json_data
-
-@app.route("/getDesc", methods=['POST'])
-def getDesc():
-    ##이것만 요청하는 경우에는 속ㄷ고가 상당히 빠름. 0.006초 정도, 그렇다면 포인트도 분리한다면?
-    ##이것은 받는쪽이나 보내는쪽에서 인코딩, 디코딩 하는 시간도 고려해야 한다는 것을 의미하는듯
-    params = ujson.loads(request.data)
-    id = int(params['id'])
-    desc1 = FrameData[id]['descriptors']  # 256x300 으로 이게 아마 row 부터 전송이 될 수 있음. 받는 곳에서 이것도 다시 확인이 필요함. 수퍼 글루가 아니면 트랜스포즈 해서 넣는것도 방법일 듯.
-    #res = str(base64.b64encode(desc1))
-    #json_data = ujson.dumps({'desc': res})
-    return bytes(desc1)
-"""
 
 @app.route("/supergluematch", methods=['POST'])
 def supergluematch():
@@ -697,6 +688,7 @@ if __name__ == "__main__":
     SEGMENTATION_SERVER_ADDR = opt.SEGMENTATION_SERVER
     mappingserver_addr = SLAM_SERVER_ADDR+'/NotifyNewFrame'
     mappingserver_addr2 = SLAM_SERVER_ADDR+'/ReceiveMapData'
+    mappingserver_addr3 = SLAM_SERVER_ADDR + '/SaveMapData'
     mappingserver_connect = SLAM_SERVER_ADDR+'/connect'
     depthserver_addr = DEPTH_SERVER_ADDR+'/depthestimate'#95.112, #6.143
     semanticserver_addr = SEGMENTATION_SERVER_ADDR+'/segment'
