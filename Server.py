@@ -29,7 +29,19 @@ def work(cv,  queue):
         message = queue.pop()
         cv.release()
         # 처리 시작
-
+        img_array = np.frombuffer(message.data, dtype=np.uint8)
+        img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        input_batch = transform(img_cv).to(device)
+        with torch.no_grad():
+            prediction = midas(input_batch)
+            prediction = torch.nn.functional.interpolate(
+                prediction.unsqueeze(1),
+                size=img_cv.shape[:2],
+                mode="bicubic",
+                align_corners=False,
+            ).squeeze().cpu().numpy()
+        requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdepth",bytes(prediction))
+        requests.post(PROCESS_SERVER_ADDR + "/notify", ujson.dumps({'user':message.user, 'map':message.map, 'id':message.id,'key': 'bdepth'}))
         # processing end
 
 
