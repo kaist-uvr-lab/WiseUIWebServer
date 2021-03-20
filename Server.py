@@ -41,7 +41,7 @@ def work(cv,  queue):
                 align_corners=False,
             ).squeeze().cpu().numpy()
         requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdepth",bytes(prediction))
-        requests.post(PROCESS_SERVER_ADDR + "/notify", ujson.dumps({'user':message.user, 'map':message.map, 'id':message.id,'key': 'bdepth'}))
+        requests.post(PROCESS_SERVER_ADDR + "/notify", ujson.dumps({'user':message.user, 'map':message.map, 'id':int(message.id),'key': 'bdepth'}))
         # processing end
 
 
