@@ -29,6 +29,7 @@ def work(cv,  queue):
         message = queue.pop()
         cv.release()
         # 처리 시작
+        start = time.time()
         img_array = np.frombuffer(message.data, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         input_batch = transform(img_cv).to(device)
@@ -42,6 +43,9 @@ def work(cv,  queue):
             ).squeeze().cpu().numpy()
         requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdepth",bytes(prediction))
         requests.post(PROCESS_SERVER_ADDR + "/notify", ujson.dumps({'user':message.user, 'map':message.map, 'id':int(message.id),'key': 'bdepth'}))
+        end = time.time()
+        print("Depth Estimation Processing = %s : %f : %d" % (message.id, end - start, len(queue)))
+
         # processing end
 
 
