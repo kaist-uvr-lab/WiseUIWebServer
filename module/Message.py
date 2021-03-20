@@ -4,3 +4,8 @@ class Message:
         self.map = map
         self.id = id
         self.data = data
+
+    def __init__(self, user, map, id):
+        self.user = user
+        self.map = map
+        self.id = id
