@@ -87,13 +87,6 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
 
-    ###LOAD MIDAS
-    midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
-    midas.to(device)
-    midas.eval()
-    midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
-    transform = midas_transforms.default_transform
-
     queue = []
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
     PROCESS_SERVER_ADDR = opt.PROCESS_SERVER_ADDR
