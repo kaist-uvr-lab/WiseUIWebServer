@@ -48,9 +48,11 @@ def work(cv,  queue):
         requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bkpts",kpts.tobytes())
         requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdesc",desc.transpose().tobytes())
         requests.post(PROCESS_SERVER_ADDR + "/notify",
-                      ujson.dumps({'user': message.user, 'map': message.map, 'id': message.id, 'key': 'bkpts'}))
+                      ujson.dumps({'user': message.user, 'map': message.map, 'id': int(message.id), 'key': 'bkpts'}))
+        requests.post(PROCESS_SERVER_ADDR + "/notify",
+                      ujson.dumps({'user': message.user, 'map': message.map, 'id': int(message.id), 'key': 'bdesc'}))
         end = time.time()
-        print("Super Point Processing = %s : %f : %d"%(id, end-start, len(queue)))
+        print("Super Point Processing = %s : %f : %d"%(message.id, end-start, len(queue)))
 
         # processing end
 
