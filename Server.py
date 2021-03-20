@@ -21,13 +21,13 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 #work에서 호출하는 cv가 필요함.
-def work(cv,  queue):
+def processingthread():
     print("Start Message Processing Thread")
     while True:
-        cv.acquire()
-        cv.wait()
-        message = queue.pop()
-        cv.release()
+        ConditionVariable2.acquire()
+        ConditionVariable2.wait()
+        message = processqueue.pop()
+        ConditionVariable2.release()
         # 처리 시작
         start = time.time()
         img_array = np.frombuffer(message.data, dtype=np.uint8)
@@ -44,18 +44,33 @@ def work(cv,  queue):
         requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdepth",bytes(prediction))
         requests.post(PROCESS_SERVER_ADDR + "/notify", ujson.dumps({'user':message.user, 'map':message.map, 'id':int(message.id),'key': 'bdepth'}))
         end = time.time()
-        print("Depth Estimation Processing = %s : %f : %d" % (message.id, end - start, len(queue)))
+        print("Depth Estimation Processing = %s : %f : %d" % (message.id, end - start, len(processqueue)))
 
         # processing end
 
+def datathread():
+
+    while True:
+        ConditionVariable.acquire()
+        ConditionVariable.wait()
+        message = dataqueue.pop()
+        ConditionVariable.release()
+        # 처리 시작
+        response = requests.post(FACADE_SERVER_ADDR + "/SendData?map=" + message.map + "&id=" + message.id + "&key=bimage","")
+        processqueue.append(message)
+
+        # processing end
+        ConditionVariable2.acquire()
+        ConditionVariable2.notify()
+        ConditionVariable2.release()
 
 @app.route("/Receive", methods=['POST'])
 def Receive():
     user = request.args.get('user')
     map = request.args.get('map')
     id = request.args.get('id')
-    message = Message(user, map, id, request.data)
-    queue.append(message)
+    message = Message(user, map, id)
+    dataqueue.append(message)
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
@@ -91,10 +106,12 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
 
-    queue = []
+    dataqueue = []
+    processqueue = []
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
     PROCESS_SERVER_ADDR = opt.PROCESS_SERVER_ADDR
     ConditionVariable = threading.Condition()
+    ConditionVariable2 = threading.Condition()
 
     ###LOAD MIDAS
     midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
@@ -103,8 +120,12 @@ if __name__ == "__main__":
     midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
     transform = midas_transforms.default_transform
 
-    th1 = threading.Thread(target=work, args=(ConditionVariable, queue))
+
+    th1 = threading.Thread(target=datathread)
+    th2 = threading.Thread(target=processingthread)
+
     th1.start()
+    th2.start()
 
     print('Starting the API')
     #app.run(host=opt.ip, port=opt.port)
