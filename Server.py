@@ -21,6 +21,8 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 #work에서 호출하는 cv가 필요함.
+
+import os
 def processingthread():
     print("Start Message Processing Thread")
     while True:
@@ -55,10 +57,10 @@ def datathread():
         ConditionVariable.wait()
         message = dataqueue.pop()
         ConditionVariable.release()
-        # 처리 시작
+        # processing start
         response = requests.post(FACADE_SERVER_ADDR + "/SendData?map=" + message.map + "&id=" + message.id + "&key=bimage","")
+        message.data = response.content
         processqueue.append(message)
-
         # processing end
         ConditionVariable2.acquire()
         ConditionVariable2.notify()
