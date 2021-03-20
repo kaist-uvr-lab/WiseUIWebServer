@@ -92,6 +92,13 @@ if __name__ == "__main__":
     PROCESS_SERVER_ADDR = opt.PROCESS_SERVER_ADDR
     ConditionVariable = threading.Condition()
 
+    ###LOAD MIDAS
+    midas = torch.hub.load("intel-isl/MiDaS", "MiDaS")
+    midas.to(device)
+    midas.eval()
+    midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
+    transform = midas_transforms.default_transform
+
     th1 = threading.Thread(target=work, args=(ConditionVariable, queue))
     th1.start()
 
