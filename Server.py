@@ -108,6 +108,12 @@ if __name__ == "__main__":
         '--use_gpu', type=str, default='0',
         help='port number')
     parser.add_argument(
+        '--prior', type=str, default='0',
+        help='port number')
+    parser.add_argument(
+        '--ratio', type=str, default='1',
+        help='port number')
+    parser.add_argument(
         '--FACADE_SERVER_ADDR', type=str,
         help='facade server address')
     parser.add_argument(
@@ -219,7 +225,7 @@ if __name__ == "__main__":
 
     keyword = 'superpointandglue'
     requests.post(FACADE_SERVER_ADDR + "/ConnectServer", ujson.dumps({
-        'port':opt.port,'key': keyword
+        'port':opt.port,'key': keyword, 'prior':opt.prior, 'ratio':opt.ratio
     }))
 
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
