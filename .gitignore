@@ -1,3 +1,12 @@
-.idea/*.xml
+.idea/
 *.pyc
+*.xml
 module/__pycache__
+.idea/
+data/
+datasets/
+examples/
+lib/
+test_any_imgs_examples/
+tools/
+model/
