@@ -53,8 +53,8 @@ def work3(conv2, queue):
         #matchIDs =Frame['ids']
         ids = Frames["ids"] #전체 프레임 리스트를 의미함
         for id in ids:
-            desc1 = Frames[lastID]['descriptors'].transpose()
-            desc2 = Frames[id]['descriptors'].transpose()
+            desc1 = Frames[lastID]['descriptors']#.transpose()
+            desc2 = Frames[id]['descriptors']#.transpose()
             matches = bf.knnMatch(desc1, desc2, k=2)
             # matches  = flann.knnMatch(desc1, desc2, k=2)
             good = np.empty((len(matches)), np.int32)
@@ -81,19 +81,21 @@ def work3(conv2, queue):
         #Frames["ids"].insert(0, message.id)
 
 
-class DataMessenger(threading.Thread):
-    def __init__(self, addr):
-        threading.Thread.__init__(self)
+class DataMessenger:#(threading.Thread):
+    def __init__(self, addr, prior, ratio):
+        #threading.Thread.__init__(self)
         self.addr = addr
         self.bdata = False
+        self.prior = prior
+        self.ratio = ratio
     def setData(self, addr2, data):
         self.addr2 = addr2
         self.data = data
-        self.bdata = True
+        #self.bdata = True
     def run(self):
-        if self.bdata:
-            requests.post(self.addr + self.addr2, self.data)
-            self.bdata = False
+        #if self.bdata:
+        requests.post(self.addr + self.addr2, self.data)
+        #self.bdata = False
 
 ##work에서 호출하는 cv가 필요함.
 ##다른 서버에 뿌리는 정보
@@ -108,10 +110,12 @@ def work2(conv2, queue):
         conv2.release()
         lastID = message.id
 
-        addr2 = "?map="+map+"&id="+str(lastID)
+        addr2 = "?user="+message.user+"&map="+map+"&id="+str(lastID)
         for messenger in PreprocessingServerList:
-            messenger.setData(addr2, message.data)
-            messenger.run()
+            #messenger.setData(addr2, '')
+            #messenger.run()
+            if lastID % messenger.ratio == 0:
+                requests.post(messenger.addr + addr2,'')#message.data
         end = time.time()
         print("data send id = %d %f"%(lastID, end-start))
         #requests.post(depthserver_addr+addr2, message.data)
@@ -155,12 +159,17 @@ def ConnectServer():
     data = ujson.loads(request.data)
     port = data['port']
     datakey = data['key']
+    prior = int(data['prior'])
+    ratio = int(data['ratio'])
     addr = 'http://'+request.remote_addr+':'+str(port)+'/Receive'
-    #print("%s %s"%(addr, datakey))
 
-    t = DataMessenger(addr)
-    t.start()
-    PreprocessingServerList.append(t)
+    if datakey not in PreSererKeys:
+        t = DataMessenger(addr, prior, ratio)
+        #t.start()
+        PreprocessingServerList.append(t)
+        PreSererKeys.append(datakey)
+        sorted(PreprocessingServerList, key=lambda messenger:messenger.prior)
+        print("Connect %s %d %d"%(addr, prior, ratio))
     return ''
 
 @app.route("/Connect", methods=['POST'])
@@ -210,6 +219,8 @@ def Connect():
     if MapData.get(map) is None:
         MapData[map] = Map(map)
 
+    MapData[map].Connect(id, UserData[user.id])
+
     #print('Connect %s'%(user))
 
     return ""
@@ -217,6 +228,9 @@ def Connect():
 def Disconnect():
     user = request.args.get('userID')
     print("Disconnect : "+UserData[user].id)
+    mapName = request.args.get('mapName')
+    MapData[mapName].Disconnect(user)
+
     requests.post(SLAM_SERVER_ADDR+"/Disconnect", ujson.dumps({
         'u': user
     }))
@@ -282,12 +296,20 @@ def SaveMap():
     #for id in kfids:
     #    map.Frames[id]["pose"]
 
+    ##delete data
+    del map.Users
+
     fname = os.path.dirname(os.path.realpath(__file__))+'/map/'+mapname+'.bin'
     #f = open(fname, 'w')
     #f.close()
     f = open(fname, "wb+")
     pickle.dump(map, f)
     f.close()
+
+    ##add manager id
+
+
+
     """
     idx = 0
     total = 0
@@ -354,18 +376,6 @@ def StartMap(mapname):
     MapData[mapname] = map
     print(len(MapData[mapname].Frames))
     requests.post(mappingserver_addr2, "a")
-
-@app.route("/GetLastFrameID", methods=['POST'])
-def GetLastFrameID():
-    map = MapData[request.args.get('map')]
-    return ujson.dumps({'n': map.UpdateIDs[request.args.get('key')]})
-
-@app.route("/SetLastFrameID", methods=['POST'])
-def SetLastFrameID():
-    map = MapData[request.args.get('map')]
-    id = int(request.values.get('id'))
-    map.UpdateIDs[request.values.get('key')] = id
-    return "a"
 
 @app.route("/AddKeyFrame", methods=['POST'])
 def AddKeyFrame():
@@ -440,7 +450,10 @@ def ReceiveData():
     attr = request.args.get('attr', 'Frames')
     getattr(map, attr)[id][key] = request.data
     #map.Frames[id][key] = request.data
-    map.UpdateIDs[key] = id
+    if key == 'bdesc':
+        darray = np.frombuffer(request.data, dtype=np.float32)
+        da = darray.reshape((-1, 256))
+        map.Frames[id]['descriptors'] = da
     return "a"
 
 @app.route("/SendData", methods=['POST'])
@@ -463,8 +476,8 @@ def featurematch():
     id1 = int(request.args.get('id1'))
     id2 = int(request.args.get('id2'))
 
-    desc1 = map.Frames[id1]['descriptors'].transpose()
-    desc2 = map.Frames[id2]['descriptors'].transpose()
+    desc1 = map.Frames[id1]['descriptors']#.transpose()
+    desc2 = map.Frames[id2]['descriptors']#.transpose()
     matches = bf.knnMatch(desc1, desc2, k=2)
     # matches  = flann.knnMatch(desc1, desc2, k=2)
     good = np.empty((len(matches)), np.int32)
@@ -476,7 +489,7 @@ def featurematch():
             success = success + 1
         else:
             good[i] = 10000
-    print("%d %d : %d"%(desc1.shape[0], desc2.shape[0], success))
+    print("%d %d : %d"%(id1, id2, success))
     # print("match : id = %d, %d, res %d"%(id1, id2, success))
     # print("KnnMatch time = %f , %d %d" % (time.time() - start, len(matches), nres))
     # print("featurematch %d : %d %d"%(len(good), len(desc1), len(desc2)))
@@ -627,6 +640,7 @@ if __name__ == "__main__":
 
     ##Preprocessing Server
     PreprocessingServerList = []
+    PreSererKeys = []
 
     if opt.MAP:
         StartMap(opt.MAP)

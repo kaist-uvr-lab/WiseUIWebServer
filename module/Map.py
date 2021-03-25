@@ -1,7 +1,6 @@
 class Map:
     def __init__(self, name):
         self.name = name
-        self.keys_updated_id = ['bsegmentation', 'bdepth', 'rdepth', 'reference']
         self.reset()
 
     def AddFrame(self, Frame):
@@ -11,13 +10,15 @@ class Map:
         return id
 
     def reset(self):
-        self.UpdateIDs = {}
-        for key in self.keys_updated_id:
-            self.UpdateIDs[key] = -1
         self.id = 0
         self.Frames = {}
         self.MapPoints = {}
         self.Matches = {}
-        #self.Frames["ids"] = []
-        #self.MapPoints["ids"] = []
-        #self.Matches["ids"] = []
+        self.Users = {}
+
+    def Connect(self, user, User):
+        self.Users[user] = User
+
+    def Disconnect(self, user):
+        if self.Users.get(user) is not None:
+            del self.Users[user]
