@@ -3,21 +3,24 @@ class Map:
         self.name = name
         self.reset()
 
-    def AddFrame(self, Frame):
-        id = self.id
-        self.Frames[id] = Frame
+    def IncreaseID(self):
+        id = str(self.id)
+        #self.Frames[id] = Frame
         self.id = self.id + 1
         return id
 
     def reset(self):
         self.id = 0
+        self.Users = {}
         self.Frames = {}
         self.MapPoints = {}
+        self.Models = {}
         self.Matches = {}
-        self.Users = {}
 
     def Connect(self, user, User):
-        self.Users[user] = User
+        self.Users[user] = {}
+        self.Users[user]['data'] = User
+        self.Users[user]['refid'] = (-1).to_bytes(4, 'little', signed=True)
 
     def Disconnect(self, user):
         if self.Users.get(user) is not None:

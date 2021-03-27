@@ -18,6 +18,7 @@ import os
 ##import super glue and super point
 ##################################################
 import pickle
+import struct
 from module.User    import User
 from module.Map     import Map
 from module.Message import Message
@@ -108,9 +109,9 @@ def work2(conv2, queue):
         message = queue[-1]
         map = message.map
         conv2.release()
-        lastID = message.id
+        lastID = int(message.id)
 
-        addr2 = "?user="+message.user+"&map="+map+"&id="+str(lastID)
+        addr2 = "?user="+message.user+"&map="+map+"&id="+message.id
         for messenger in PreprocessingServerList:
             #messenger.setData(addr2, '')
             #messenger.run()
@@ -129,16 +130,19 @@ def work1(condition1, condition2, queue, queue2):
         message = queue[-1]
         condition1.release()
         ##### 처리 시작
+        ##message id = time stamp -> string(id)
         start = time.time()
-
+        map = MapData[message.map]
         user = UserData[message.user]
+        id = map.IncreaseID()
+        user.AddData(id, message.id)
         Frame = {}
         Frame['bimage'] = message.data #인코딩된 바이트 형태
         Frame['binfo'] = user.info
+        map.Frames[id] = Frame
+        message.id = id
         ##id 관리 및 user 정보에 추가
-        lastid = MapData[message.map].AddFrame(Frame)
-        user.AddData(lastid, message.timestamp)
-        message.id = lastid
+        #lastid = MapData[message.map].AddFrame(Frame)
 
         end2 = time.time()
         #requests.post(mappingserver_addr, ujson.dumps({'id': message.id, 'user': message.user}))
@@ -400,18 +404,16 @@ def ReceiveAndDetect():
     start = time.time()
     user = request.args.get('user')
     map = MapData[request.args.get('map')]
-    id = request.args.get('id') #string
+    ts = request.args.get('id') #string
 
-    message = Message(user, map.name, id, request.data)
+    message = Message(user, map.name, ts, request.data)
     end = time.time()
     #print("Receive Time : %f = %d" % (end - start, id))
-
     messages.append(message)
-
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
-    return ujson.dumps({'id': id})
+    return ''#struct.pack('>i',5)#int(id).to_bytes(4, 'little')
 
 ####단말에 전송할 데이터 관련 함수
 @app.route("/ReceiveFrameID", methods=['POST'])
@@ -445,22 +447,30 @@ def SendFrameID():
 @app.route("/ReceiveData", methods=['POST'])
 def ReceiveData():
     map = MapData[request.args.get('map')]
-    id = int(request.args.get('id'))
+    id = request.args.get('id')
     key = request.args.get('key')
     attr = request.args.get('attr', 'Frames')
-    getattr(map, attr)[id][key] = request.data
+
     #map.Frames[id][key] = request.data
     if key == 'bdesc':
         darray = np.frombuffer(request.data, dtype=np.float32)
         da = darray.reshape((-1, 256))
         map.Frames[id]['descriptors'] = da
+    elif attr == 'Models':
+        model = getattr(map, attr)
+        if model.get(id) is None:
+            model[id] = {}
+    #if key == 'refid':
+    #    print(type(request.data))
+    getattr(map, attr)[id][key] = request.data
+
     return "a"
 
 @app.route("/SendData", methods=['POST'])
 def SendData():
     map = MapData[request.args.get('map')]
     attr = request.args.get('attr', 'Frames')
-    id = int(request.args.get('id', -1))
+    id = request.args.get('id', -1)
     key = request.args.get('key')
 
     if id == -1:
