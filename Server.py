@@ -53,6 +53,7 @@ def processingthread():
                       ujson.dumps({'user': message.user, 'map': message.map, 'id': int(message.id), 'key': 'bkpts'}))
         requests.post(PROCESS_SERVER_ADDR + "/notify",
                       ujson.dumps({'user': message.user, 'map': message.map, 'id': int(message.id), 'key': 'bdesc'}))
+
         end = time.time()
         print("Super Point Processing = %s : %f : %d"%(message.id, end-start, len(processqueue)))
 
