@@ -47,11 +47,11 @@ def processingthread():
         kpts = last_data['keypoints'][0].cpu().detach().numpy()
         # scores = last_data['scores'][0].cpu().detach().numpy()
 
-        requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bkpts",kpts.tobytes())
-        requests.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdesc",desc.transpose().tobytes())
-        requests.post(PROCESS_SERVER_ADDR + "/notify",
+        sess.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bkpts",kpts.tobytes())
+        sess.post(FACADE_SERVER_ADDR + "/ReceiveData?map=" + message.map + "&id=" + message.id + "&key=bdesc",desc.transpose().tobytes())
+        sess.post(PROCESS_SERVER_ADDR + "/notify",
                       ujson.dumps({'user': message.user, 'map': message.map, 'id': int(message.id), 'key': 'bkpts'}))
-        requests.post(PROCESS_SERVER_ADDR + "/notify",
+        sess.post(PROCESS_SERVER_ADDR + "/notify",
                       ujson.dumps({'user': message.user, 'map': message.map, 'id': int(message.id), 'key': 'bdesc'}))
 
         end = time.time()
@@ -224,8 +224,10 @@ if __name__ == "__main__":
     #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
 
+
     keyword = 'superpointandglue'
-    requests.post(FACADE_SERVER_ADDR + "/ConnectServer", ujson.dumps({
+    sess = requests.Session()
+    sess.post(FACADE_SERVER_ADDR + "/ConnectServer", ujson.dumps({
         'port':opt.port,'key': keyword, 'prior':opt.prior, 'ratio':opt.ratio
     }))
 
