@@ -23,6 +23,9 @@ from module.User    import User
 from module.Map     import Map
 from module.Message import Message
 
+##multicast
+from socket import *
+
 ####WSGI
 from gevent.pywsgi import WSGIServer
 from gevent import monkey
@@ -178,14 +181,15 @@ def ConnectServer():
 
 @app.route("/Connect", methods=['POST'])
 def Connect():
-    print(request.remote_user)
-    print(request.remote_addr)
-    print(request.environ['REMOTE_PORT'])
+    #print(request.remote_user)
+    #print(request.remote_addr)
+    #print(request.environ['REMOTE_PORT'])
 
     data = ujson.loads(request.data)
     id = data['userID']
     map = data['mapName']
     bMapping = data['bMapping']
+    bManager = data['bManager']
     fx = data['fx']
     fy = data['fy']
     cx = data['cx']
@@ -213,18 +217,29 @@ def Connect():
     user['image'] = imgSize
     """
     if UserData.get(id) is None:
-        user = User(id, map, bMapping, fx, fy, cx, cy, w, h, info)#cameraParam, imgSize)
+        if bManager:
+            print("Connect Map Manager")
+        user = User(id, map, bMapping, bManager, fx, fy, cx, cy, w, h, info)#cameraParam, imgSize)
         UserData[user.id] = user
-        print('Connect Num = %d' % (len(UserData)))
         #print('Connect Map = %s %s' % (UserData[user.id].id, MapData[map].name))
     else:
         user = UserData[id]
-        print('Connect Num = %d' % (len(UserData)))
     if MapData.get(map) is None:
         MapData[map] = Map(map)
 
-    MapData[map].Connect(id, UserData[user.id])
+    TempMap = MapData[map]
+    TempMap.Connect(id, UserData[user.id])
 
+    print("connect : %s, %d" % (user.id, len(UserData)))
+    print(TempMap.Users[user.id]['id'])
+
+    #multi cast code
+    #byte
+    #connect 1 id, disconnect 2 id, pose 3 id + data
+    msg = np.array([1, (TempMap.Users[user.id]['id'])], dtype=np.float32)
+    #print(msg)
+    sented = mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
+    print("senteed %d , %d"%(sented, len(msg.tobytes())))
     #print('Connect %s'%(user))
 
     return ""
@@ -233,7 +248,15 @@ def Disconnect():
     user = request.args.get('userID')
     print("Disconnect : "+UserData[user].id)
     mapName = request.args.get('mapName')
-    MapData[mapName].Disconnect(user)
+    tempMap = MapData[mapName]
+    tid = tempMap.Users[user]['id']
+    tempMap.Disconnect(user)
+
+    #multicast
+    msg = np.array([2, tid], dtype=np.float32)
+    msg.tobytes()
+    mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
+    # multicast
 
     requests.post(SLAM_SERVER_ADDR+"/Disconnect", ujson.dumps({
         'u': user
@@ -402,6 +425,7 @@ def ReceiveTrackingData():
 @app.route("/ReceiveAndDetect", methods=['POST'])
 def ReceiveAndDetect():
     start = time.time()
+
     user = request.args.get('user')
     map = MapData[request.args.get('map')]
     ts = request.args.get('id') #string
@@ -663,6 +687,13 @@ if __name__ == "__main__":
     #th3.start()
 
     #run echo server
+
+    ##mutli cast
+    mcast_manage_soc = socket(AF_INET, SOCK_DGRAM)
+    mcast_manage_soc.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 4)
+    MCAST_MANAGE_IP = '235.26.17.10'
+    MCAST_MANAGAE_PORT = 37000
+    #multi_soc.sendto('Multicasting',('235.26.17.10',37000))
 
 
     print('Starting the API')

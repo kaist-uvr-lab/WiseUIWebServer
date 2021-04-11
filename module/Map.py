@@ -4,13 +4,14 @@ class Map:
         self.reset()
 
     def IncreaseID(self):
-        id = str(self.id)
+        id = str(self.fid)
         #self.Frames[id] = Frame
-        self.id = self.id + 1
+        self.fid = self.fid + 1
         return id
 
     def reset(self):
-        self.id = 0
+        self.fid = 0
+        self.uid = 0
         self.Users = {}
         self.Frames = {}
         self.MapPoints = {}
@@ -18,7 +19,9 @@ class Map:
         self.Matches = {}
 
     def Connect(self, user, User):
+        self.uid = self.uid + 1
         self.Users[user] = {}
+        self.Users[user]['id'] = self.uid
         self.Users[user]['data'] = User
         self.Users[user]['refid'] = (-1).to_bytes(4, 'little', signed=True)
 

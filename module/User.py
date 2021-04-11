@@ -1,8 +1,9 @@
 class User:
-    def __init__(self, _id, _map, _mapping, fx, fy, cx, cy, w, h, info):
+    def __init__(self, _id, _map, _mapping, _manager, fx, fy, cx, cy, w, h, info):
         self.id = _id
         self.map = _map
         self.mapping = _mapping
+        self.manage  = _manager
         self.fx = fx
         self.fy = fy
         self.cx = cx
