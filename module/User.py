@@ -1,5 +1,5 @@
 class User:
-    def __init__(self, _id, _map, _mapping, _manager, fx, fy, cx, cy, w, h, info):
+    def __init__(self, _id, _map, _mapping, _manager, _addr, fx, fy, cx, cy, w, h, info):
         self.id = _id
         self.map = _map
         self.mapping = _mapping
@@ -10,6 +10,7 @@ class User:
         self.cy = cy
         self.w = w
         self.h = h
+        self.addr = _addr
         self.info = info
 
         #cameraParam = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float32)

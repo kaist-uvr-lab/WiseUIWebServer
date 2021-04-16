@@ -142,6 +142,7 @@ def work1(condition1, condition2, queue, queue2):
         Frame = {}
         Frame['bimage'] = message.data #인코딩된 바이트 형태
         Frame['binfo'] = user.info
+        Frame['user'] = user.id
         map.Frames[id] = Frame
         message.id = id
         ##id 관리 및 user 정보에 추가
@@ -196,6 +197,8 @@ def Connect():
     cy = data['cy']
     w = data['w']
     h = data['h']
+    port = int(request.args.get('port'))
+
     info = np.array([fx, fy, cx, cy, w, h], dtype=np.float32).tobytes()
     requests.post(mappingserver_connect, ujson.dumps({
         'fx':fx,
@@ -219,7 +222,8 @@ def Connect():
     if UserData.get(id) is None:
         if bManager:
             print("Connect Map Manager")
-        user = User(id, map, bMapping, bManager, fx, fy, cx, cy, w, h, info)#cameraParam, imgSize)
+
+        user = User(id, map, bMapping, bManager, (request.remote_addr, port), fx, fy, cx, cy, w, h, info)#cameraParam, imgSize)
         UserData[user.id] = user
         #print('Connect Map = %s %s' % (UserData[user.id].id, MapData[map].name))
     else:
@@ -230,16 +234,27 @@ def Connect():
     TempMap = MapData[map]
     TempMap.Connect(id, UserData[user.id])
 
-    print("connect : %s, %d" % (user.id, len(UserData)))
-    print(TempMap.Users[user.id]['id'])
+    #global manage_addr
+    if manage_id is None and bManager is True:
+        manage_id = user.id
+        #manage_addr = (request.remote_addr, port)
+        #print(manage_addr)
+        bManageConnect = True
 
-    #multi cast code
-    #byte
-    #connect 1 id, disconnect 2 id, pose 3 id + data
-    msg = np.array([1, (TempMap.Users[user.id]['id'])], dtype=np.float32)
-    #print(msg)
-    sented = mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
-    print("senteed %d , %d"%(sented, len(msg.tobytes())))
+    if manage_addr is not None:
+        msg = np.array([1, 1, (TempMap.Users[user.id]['id'])], dtype=np.float32)
+        udp_manage_soc.sendto(msg, manage_addr)
+        # multi cast code
+        # byte
+        # connect 1 id, disconnect 2 id, pose 3 id + data
+        # print(msg)
+        # sented = mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
+        # print("senteed %d , %d"%(sented, len(msg.tobytes())))
+
+    print("connect : %s, %d" % (user.id, len(UserData)))
+    #print(TempMap.Users[user.id]['id'])
+
+
     #print('Connect %s'%(user))
 
     return ""
@@ -252,11 +267,12 @@ def Disconnect():
     tid = tempMap.Users[user]['id']
     tempMap.Disconnect(user)
 
-    #multicast
-    msg = np.array([2, tid], dtype=np.float32)
-    msg.tobytes()
-    mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
-    # multicast
+    if manage_addr is not None:
+        #multicast
+        msg = np.array([1, 2, tid], dtype=np.float32)
+        udp_manage_soc.sendto(msg, manage_addr)
+        #mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
+        # multicast
 
     requests.post(SLAM_SERVER_ADDR+"/Disconnect", ujson.dumps({
         'u': user
@@ -484,6 +500,16 @@ def ReceiveData():
         model = getattr(map, attr)
         if model.get(id) is None:
             model[id] = {}
+        #if key =='brmat':
+
+    elif key=='bpose':
+        if manage_addr is not None:
+            tempid = map.Users[map.Frames[id]['user']]['id']
+            msg = np.array([1, 3, tempid], dtype=np.float32).tobytes()+request.data
+            udp_manage_soc.sendto(msg, manage_addr)
+            #print(len(msg))
+        else:
+            print("as;a;ksdjfasadf")
     #if key == 'refid':
     #    print(type(request.data))
     getattr(map, attr)[id][key] = request.data
@@ -693,6 +719,16 @@ if __name__ == "__main__":
     mcast_manage_soc.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 4)
     MCAST_MANAGE_IP = '235.26.17.10'
     MCAST_MANAGAE_PORT = 37000
+
+    ##udp socket
+    udp_manage_soc = socket(AF_INET, SOCK_DGRAM)
+    manage_id = None
+    #manage_addr = None
+    bManageConnect = False
+    #udp_manage_addr = ('0.0.0.0', 37001)
+    #udp_manage_soc.bind(udp_manage_addr)
+
+
     #multi_soc.sendto('Multicasting',('235.26.17.10',37000))
 
 
