@@ -234,16 +234,14 @@ def Connect():
     TempMap = MapData[map]
     TempMap.Connect(id, UserData[user.id])
 
-    #global manage_addr
+    global manage_id
     if manage_id is None and bManager is True:
         manage_id = user.id
-        #manage_addr = (request.remote_addr, port)
-        #print(manage_addr)
         bManageConnect = True
-
-    if manage_addr is not None:
+    if manage_id is not None:
+        Manager = UserData[manage_id]
         msg = np.array([1, 1, (TempMap.Users[user.id]['id'])], dtype=np.float32)
-        udp_manage_soc.sendto(msg, manage_addr)
+        udp_manage_soc.sendto(msg, Manager.addr)
         # multi cast code
         # byte
         # connect 1 id, disconnect 2 id, pose 3 id + data
@@ -267,10 +265,10 @@ def Disconnect():
     tid = tempMap.Users[user]['id']
     tempMap.Disconnect(user)
 
-    if manage_addr is not None:
+    if manage_id is not None:
         #multicast
         msg = np.array([1, 2, tid], dtype=np.float32)
-        udp_manage_soc.sendto(msg, manage_addr)
+        udp_manage_soc.sendto(msg, UserData[manage_id].addr)
         #mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
         # multicast
 
@@ -500,16 +498,23 @@ def ReceiveData():
         model = getattr(map, attr)
         if model.get(id) is None:
             model[id] = {}
-        #if key =='brmat':
+        nid = int(id)
+        if key =='brmat':
+            msg = np.array([3, nid, 1], dtype=np.float32).tobytes() + request.data
+            udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
+        elif key =='bparam':
+            msg = np.array([3, nid, 2], dtype=np.float32).tobytes() + request.data
+            udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
 
     elif key=='bpose':
-        if manage_addr is not None:
-            tempid = map.Users[map.Frames[id]['user']]['id']
-            msg = np.array([1, 3, tempid], dtype=np.float32).tobytes()+request.data
-            udp_manage_soc.sendto(msg, manage_addr)
-            #print(len(msg))
-        else:
-            print("as;a;ksdjfasadf")
+        uid = map.Frames[id]['user']
+        tempid = map.Users[uid]['id']
+        msg = np.array([1, 3, tempid], dtype=np.float32).tobytes() + request.data
+        sented = udp_manage_soc.sendto(msg, UserData[uid].addr)
+        print("send %d to %s"%(sented, UserData[uid].addr))
+        if manage_id is not None:
+            udp_manage_soc.sendto(msg, UserData[manage_id].addr)
+
     #if key == 'refid':
     #    print(type(request.data))
     getattr(map, attr)[id][key] = request.data
@@ -645,6 +650,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '--port', type=int, default=35005,
         help='port number')
+    parser.add_argument(
+        '--CONTENT_IP', type=str, default='0.0.0.0',
+        help='ip address')
+    parser.add_argument(
+        '--CONTENT_PORT', type=int, default=35001,
+        help='port number')
 
     parser.add_argument(
         '--SLAM_SERVER', type=str,
@@ -691,6 +702,7 @@ if __name__ == "__main__":
     mappingserver_connect = SLAM_SERVER_ADDR+'/connect'
     depthserver_addr = DEPTH_SERVER_ADDR+'/depthestimate'#95.112, #6.143
     semanticserver_addr = SEGMENTATION_SERVER_ADDR+'/segment'
+    CONTENT_ECHO_SERVER_ADDR = (opt.CONTENT_IP, opt.CONTENT_PORT)
 
     ConditionVariable = threading.Condition()
     ConditionVariable2 = threading.Condition()
