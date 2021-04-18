@@ -182,9 +182,6 @@ def ConnectServer():
 
 @app.route("/Connect", methods=['POST'])
 def Connect():
-    #print(request.remote_user)
-    #print(request.remote_addr)
-    #print(request.environ['REMOTE_PORT'])
 
     data = ujson.loads(request.data)
     id = data['userID']
@@ -212,13 +209,6 @@ def Connect():
         'u':id
     }))
 
-    """
-    user.id
-    user['map'] = map
-    user['mapping'] = bMapping
-    user['camera'] = cameraParam
-    user['image'] = imgSize
-    """
     if UserData.get(id) is None:
         if bManager:
             print("Connect Map Manager")
@@ -248,14 +238,16 @@ def Connect():
         # print(msg)
         # sented = mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
         # print("senteed %d , %d"%(sented, len(msg.tobytes())))
+    ip = user.addr[0].split('.')
+    nManager = 0
+    if bManager:
+        nManager = 1
+    msg = np.array([1, 1, (TempMap.Users[user.id]['id']), nManager, ip[0], ip[1], ip[2], ip[3], port], dtype=np.float32)
+    udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
+
 
     print("connect : %s, %d" % (user.id, len(UserData)))
-    #print(TempMap.Users[user.id]['id'])
-
-
-    #print('Connect %s'%(user))
-
-    return ""
+    return (TempMap.Users[user.id]['id']).to_bytes(4, 'little', signed=True)
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
     user = request.args.get('userID')
@@ -271,6 +263,9 @@ def Disconnect():
         udp_manage_soc.sendto(msg, UserData[manage_id].addr)
         #mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
         # multicast
+
+    msg = np.array([1, 2, tid], dtype=np.float32)
+    udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
 
     requests.post(SLAM_SERVER_ADDR+"/Disconnect", ujson.dumps({
         'u': user
@@ -510,10 +505,10 @@ def ReceiveData():
         uid = map.Frames[id]['user']
         tempid = map.Users[uid]['id']
         msg = np.array([1, 3, tempid], dtype=np.float32).tobytes() + request.data
-        sented = udp_manage_soc.sendto(msg, UserData[uid].addr)
-        print("send %d to %s"%(sented, UserData[uid].addr))
-        if manage_id is not None:
-            udp_manage_soc.sendto(msg, UserData[manage_id].addr)
+        sented = udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
+        # sented = udp_manage_soc.sendto(msg, UserData[uid].addr)
+        #if manage_id is not None:
+        #    udp_manage_soc.sendto(msg, UserData[manage_id].addr)
 
     #if key == 'refid':
     #    print(type(request.data))
@@ -714,6 +709,20 @@ if __name__ == "__main__":
     PreprocessingServerList = []
     PreSererKeys = []
 
+    ##mutli cast
+    mcast_manage_soc = socket(AF_INET, SOCK_DGRAM)
+    mcast_manage_soc.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 32)
+    MCAST_MANAGE_IP = '235.26.17.10'
+    MCAST_MANAGAE_PORT = 37000
+
+    ##udp socket
+    udp_manage_soc = socket(AF_INET, SOCK_DGRAM)
+    manage_id = None
+    # manage_addr = None
+    bManageConnect = False
+    # udp_manage_addr = ('0.0.0.0', 37001)
+    # udp_manage_soc.bind(udp_manage_addr)
+
     if opt.MAP:
         StartMap(opt.MAP)
 
@@ -726,19 +735,7 @@ if __name__ == "__main__":
 
     #run echo server
 
-    ##mutli cast
-    mcast_manage_soc = socket(AF_INET, SOCK_DGRAM)
-    mcast_manage_soc.setsockopt(IPPROTO_IP, IP_MULTICAST_TTL, 4)
-    MCAST_MANAGE_IP = '235.26.17.10'
-    MCAST_MANAGAE_PORT = 37000
 
-    ##udp socket
-    udp_manage_soc = socket(AF_INET, SOCK_DGRAM)
-    manage_id = None
-    #manage_addr = None
-    bManageConnect = False
-    #udp_manage_addr = ('0.0.0.0', 37001)
-    #udp_manage_soc.bind(udp_manage_addr)
 
 
     #multi_soc.sendto('Multicasting',('235.26.17.10',37000))
