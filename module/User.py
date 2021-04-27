@@ -1,5 +1,5 @@
 class User:
-    def __init__(self, _id, _map, _mapping, _manager, _addr, fx, fy, cx, cy, w, h, info):
+    def __init__(self, _id, _map, _mapping, _manager, _addr, fx, fy, cx, cy, d1, d2, d3, d4, w, h, info):
         self.id = _id
         self.map = _map
         self.mapping = _mapping
@@ -8,6 +8,10 @@ class User:
         self.fy = fy
         self.cx = cx
         self.cy = cy
+        self.d1 = d1
+        self.d2 = d2
+        self.d3 = d3
+        self.d4 = d4
         self.w = w
         self.h = h
         self.addr = _addr

@@ -194,6 +194,10 @@ def Connect():
     cy = data['cy']
     w = data['w']
     h = data['h']
+    d1 = data['d1']
+    d2 = data['d2']
+    d3 = data['d3']
+    d4 = data['d4']
     port = int(request.args.get('port'))
 
     info = np.array([fx, fy, cx, cy, w, h], dtype=np.float32).tobytes()
@@ -204,16 +208,19 @@ def Connect():
         'cy':cy,
         'w':w,
         'h':h,
+        'd1':d1,
+        'd2':d2,
+        'd3':d3,
+        'd4':d4,
         'b':bMapping,
         'n':map,
         'u':id
     }))
-
+    print("%f %f %f %f"%(d1,d2,d3,d4))
     if UserData.get(id) is None:
         if bManager:
             print("Connect Map Manager")
-
-        user = User(id, map, bMapping, bManager, (request.remote_addr, port), fx, fy, cx, cy, w, h, info)#cameraParam, imgSize)
+        user = User(id, map, bMapping, bManager, (request.remote_addr, port), fx, fy, cx, cy, d1,d2,d3,d4, w, h, info)#cameraParam, imgSize)
         UserData[user.id] = user
         #print('Connect Map = %s %s' % (UserData[user.id].id, MapData[map].name))
     else:
@@ -224,20 +231,6 @@ def Connect():
     TempMap = MapData[map]
     TempMap.Connect(id, UserData[user.id])
 
-    global manage_id
-    if manage_id is None and bManager is True:
-        manage_id = user.id
-        bManageConnect = True
-    if manage_id is not None:
-        Manager = UserData[manage_id]
-        msg = np.array([1, 1, (TempMap.Users[user.id]['id'])], dtype=np.float32)
-        udp_manage_soc.sendto(msg, Manager.addr)
-        # multi cast code
-        # byte
-        # connect 1 id, disconnect 2 id, pose 3 id + data
-        # print(msg)
-        # sented = mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
-        # print("senteed %d , %d"%(sented, len(msg.tobytes())))
     ip = user.addr[0].split('.')
     nManager = 0
     if bManager:
@@ -245,9 +238,9 @@ def Connect():
     msg = np.array([1, 1, (TempMap.Users[user.id]['id']), nManager, ip[0], ip[1], ip[2], ip[3], port], dtype=np.float32)
     udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
 
-
     print("connect : %s, %d" % (user.id, len(UserData)))
     return (TempMap.Users[user.id]['id']).to_bytes(4, 'little', signed=True)
+
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
     user = request.args.get('userID')
@@ -257,13 +250,6 @@ def Disconnect():
     tid = tempMap.Users[user]['id']
     tempMap.Disconnect(user)
 
-    if manage_id is not None:
-        #multicast
-        msg = np.array([1, 2, tid], dtype=np.float32)
-        udp_manage_soc.sendto(msg, UserData[manage_id].addr)
-        #mcast_manage_soc.sendto(msg.tobytes(), (MCAST_MANAGE_IP, MCAST_MANAGAE_PORT))
-        # multicast
-
     msg = np.array([1, 2, tid], dtype=np.float32)
     udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
 
@@ -271,6 +257,7 @@ def Disconnect():
         'u': user
     }))
     return ""
+
 @app.route("/reset", methods=['POST'])
 def reset():
     print("Reset")
@@ -717,11 +704,6 @@ if __name__ == "__main__":
 
     ##udp socket
     udp_manage_soc = socket(AF_INET, SOCK_DGRAM)
-    manage_id = None
-    # manage_addr = None
-    bManageConnect = False
-    # udp_manage_addr = ('0.0.0.0', 37001)
-    # udp_manage_soc.bind(udp_manage_addr)
 
     if opt.MAP:
         StartMap(opt.MAP)
