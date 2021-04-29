@@ -229,30 +229,33 @@ def Connect():
         MapData[map] = Map(map)
 
     TempMap = MapData[map]
-    TempMap.Connect(id, UserData[user.id])
-
-    ip = user.addr[0].split('.')
-    nManager = 0
-    if bManager:
-        nManager = 1
-    msg = np.array([1, 1, (TempMap.Users[user.id]['id']), nManager, ip[0], ip[1], ip[2], ip[3], port], dtype=np.float32)
-    udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
-
+    res = TempMap.Connect(id, UserData[user.id])
+    if res:
+        ip = user.addr[0].split('.')
+        nManager = 0
+        if bManager:
+            nManager = 1
+        msg = np.array([1, 1, (TempMap.Users[user.id]['id']), nManager, ip[0], ip[1], ip[2], ip[3], port], dtype=np.float32)
+        udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
     print("connect : %s, %d" % (user.id, len(UserData)))
     return (TempMap.Users[user.id]['id']).to_bytes(4, 'little', signed=True)
 
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
     user = request.args.get('userID')
-    print("Disconnect : "+UserData[user].id)
+
     mapName = request.args.get('mapName')
     tempMap = MapData[mapName]
+
     tid = tempMap.Users[user]['id']
-    tempMap.Disconnect(user)
+    res = tempMap.Disconnect(user)
+    if res:
+        msg = np.array([1, 2, tid], dtype=np.float32)
+        udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
+    if UserData.get(user) is not None:
+        del UserData[user]
 
-    msg = np.array([1, 2, tid], dtype=np.float32)
-    udp_manage_soc.sendto(msg, CONTENT_ECHO_SERVER_ADDR)
-
+    print("Disconnect : %s = %d" % (user, len(UserData)))
     requests.post(SLAM_SERVER_ADDR+"/Disconnect", ujson.dumps({
         'u': user
     }))

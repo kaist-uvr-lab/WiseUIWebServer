@@ -19,12 +19,17 @@ class Map:
         self.Matches = {}
 
     def Connect(self, user, User):
-        self.uid = self.uid + 1
-        self.Users[user] = {}
-        self.Users[user]['id'] = self.uid
-        self.Users[user]['data'] = User
-        self.Users[user]['refid'] = (-1).to_bytes(4, 'little', signed=True)
+        if self.Users.get(user) is None:
+            self.uid = self.uid + 1
+            self.Users[user] = {}
+            self.Users[user]['id'] = self.uid
+            self.Users[user]['data'] = User
+            self.Users[user]['refid'] = (-1).to_bytes(4, 'little', signed=True)
+            return True
+        return False
 
     def Disconnect(self, user):
         if self.Users.get(user) is not None:
             del self.Users[user]
+            return True
+        return False
