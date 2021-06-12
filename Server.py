@@ -79,8 +79,8 @@ def datathread():
 @app.route("/Receive", methods=['POST'])
 def Receive():
     user = request.args.get('user')
-    map = request.args.get('map')
-    id = request.args.get('id')
+    map  = request.args.get('map')
+    id   = request.args.get('id')
     message = Message(user, map, id)
     dataqueue.append(message)
     ConditionVariable.acquire()
