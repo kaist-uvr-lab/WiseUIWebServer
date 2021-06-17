@@ -21,8 +21,6 @@ app = Flask(__name__)
 #cors = CORS(app)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
-#work에서 호출하는 cv가 필요함.
-
 import os
 def processingthread():
     print("Start Message Processing Thread")
@@ -35,15 +33,22 @@ def processingthread():
 
         data = ujson.loads(message.decode())
         id = data['id']
+        keyword = data['keyword']
+        src = data['src']
+
         res =sess.post(FACADE_SERVER_ADDR + "/Load", ujson.dumps({
             'keyword':data['keyword'],'id':id
         }))
 
         img_array = np.frombuffer(res.content, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+        Data[keyword][id] ={}
+        Data[keyword][id]['data'] = img_cv
+        Data[keyword][id]['src']  = src
+
         cv2.imshow('img', img_cv)
         cv2.waitKey(1)
-
         # processing end
 
 bufferSize = 1024
@@ -58,38 +63,6 @@ def udpthread():
         ConditionVariable.acquire()
         ConditionVariable.notify()
         ConditionVariable.release()
-
-
-
-        """
-        ConditionVariable.acquire()
-        ConditionVariable.wait()
-        message = dataqueue.pop()
-        ConditionVariable.release()
-        # processing start
-        response = requests.post(FACADE_SERVER_ADDR + "/SendData?map=" + message.map + "&id=" + message.id + "&key=bimage","")
-        message.data = response.content
-        processqueue.append(message)
-        # processing end
-        ConditionVariable2.acquire()
-        ConditionVariable2.notify()
-        ConditionVariable2.release()
-        """
-@app.route("/Receive", methods=['POST'])
-def Receive():
-    user = request.args.get('user')
-    map = request.args.get('map')
-    id = request.args.get('id')
-    message = Message(user, map, id)
-    #dataqueue.append(message)
-    ConditionVariable.acquire()
-    ConditionVariable.notify()
-    ConditionVariable.release()
-    return ""
-
-##################################################
-# END API part
-##################################################
 
 if __name__ == "__main__":
 
@@ -117,9 +90,6 @@ if __name__ == "__main__":
         '--FACADE_SERVER_ADDR', type=str,
         help='facade server address')
     parser.add_argument(
-        '--PROCESS_SERVER_ADDR', type=str,
-        help='process server address')
-    parser.add_argument(
         '--ECHO_SERVER_IP', type=str, default='0.0.0.0',
         help='ip address')
     parser.add_argument(
@@ -129,12 +99,12 @@ if __name__ == "__main__":
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
 
     print('Starting the API')
-    #app.run(host=opt.ip, port=opt.port)
-    #app.run(host=opt.ip, port = opt.port, threaded = True)
+
+    Data = {}
+    msgqueue = []
 
     ##Echo server
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
-    PROCESS_SERVER_ADDR = opt.PROCESS_SERVER_ADDR
     ReceivedKeywords=['Image','Matching']
     SendKeywords = 'Keypoints, Descriptors, Matches'
     sess = requests.Session()
@@ -147,15 +117,10 @@ if __name__ == "__main__":
     for keyword in ReceivedKeywords:
         temp = ujson.dumps({'type1':'connect', 'keyword':keyword, 'src':'FeatureServer', 'type2':'all'})
         ECHO_SOCKET.sendto(temp.encode(), ECHO_SERVER_ADDR)
+        Data[keyword]={}
     #Echo server connect
 
-    #thread
-    Data = {}
-    msgqueue = []
-    processqueue = []
-
     ConditionVariable = threading.Condition()
-    ConditionVariable2 = threading.Condition()
 
     th1 = threading.Thread(target=udpthread)
     th2 = threading.Thread(target=processingthread)
