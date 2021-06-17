@@ -27,27 +27,40 @@ import os
 def processingthread():
     print("Start Message Processing Thread")
     while True:
-        ConditionVariable2.acquire()
-        ConditionVariable2.wait()
-        message = processqueue.pop()
-        ConditionVariable2.release()
+        ConditionVariable.acquire()
+        ConditionVariable.wait()
+        message = msgqueue.pop()
+        ConditionVariable.release()
         # 처리 시작
-
-        # processing end
-bufferSize = 1024
-def datathread():
-
-    while True:
-        bytesAddressPair = ECHO_SOCKET.recvfrom(bufferSize)
-        message = bytesAddressPair[0]
-        address = bytesAddressPair[1]
 
         data = ujson.loads(message.decode())
         id = data['id']
         res =sess.post(FACADE_SERVER_ADDR + "/Load", ujson.dumps({
             'keyword':data['keyword'],'id':id
         }))
-        print(res.request.body)
+
+        img_array = np.frombuffer(res.content, dtype=np.uint8)
+        img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        cv2.imshow('img', img_cv)
+        cv2.waitKey(1)
+
+        # processing end
+
+bufferSize = 1024
+def udpthread():
+
+    while True:
+        bytesAddressPair = ECHO_SOCKET.recvfrom(bufferSize)
+        message = bytesAddressPair[0]
+        #address = bytesAddressPair[1]
+        print(message)
+        msgqueue.append(message)
+        ConditionVariable.acquire()
+        ConditionVariable.notify()
+        ConditionVariable.release()
+
+
+
         """
         ConditionVariable.acquire()
         ConditionVariable.wait()
@@ -68,7 +81,7 @@ def Receive():
     map = request.args.get('map')
     id = request.args.get('id')
     message = Message(user, map, id)
-    dataqueue.append(message)
+    #dataqueue.append(message)
     ConditionVariable.acquire()
     ConditionVariable.notify()
     ConditionVariable.release()
@@ -115,8 +128,6 @@ if __name__ == "__main__":
     opt = parser.parse_args()
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
 
-
-
     print('Starting the API')
     #app.run(host=opt.ip, port=opt.port)
     #app.run(host=opt.ip, port = opt.port, threaded = True)
@@ -134,18 +145,19 @@ if __name__ == "__main__":
     ECHO_SERVER_ADDR = (opt.ECHO_SERVER_IP, opt.ECHO_SERVER_PORT)
     ECHO_SOCKET = socket(AF_INET, SOCK_DGRAM)
     for keyword in ReceivedKeywords:
-        temp = ujson.dumps({'type1':'connect', 'keyword':keyword})
+        temp = ujson.dumps({'type1':'connect', 'keyword':keyword, 'src':'FeatureServer', 'type2':'all'})
         ECHO_SOCKET.sendto(temp.encode(), ECHO_SERVER_ADDR)
     #Echo server connect
 
     #thread
-    dataqueue = []
+    Data = {}
+    msgqueue = []
     processqueue = []
 
     ConditionVariable = threading.Condition()
     ConditionVariable2 = threading.Condition()
 
-    th1 = threading.Thread(target=datathread)
+    th1 = threading.Thread(target=udpthread)
     th2 = threading.Thread(target=processingthread)
     th1.start()
     th2.start()
