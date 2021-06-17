@@ -36,9 +36,7 @@ def processingthread():
         keyword = data['keyword']
         src = data['src']
 
-        res =sess.post(FACADE_SERVER_ADDR + "/Load", ujson.dumps({
-            'keyword':data['keyword'],'id':id
-        }))
+        res =sess.post(FACADE_SERVER_ADDR + "/Load?keyword="+keyword+"&id="+str(id),"")
 
         img_array = np.frombuffer(res.content, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
