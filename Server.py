@@ -46,6 +46,7 @@ def processingthread():
 
         res =sess.post(FACADE_SERVER_ADDR + "/Load?keyword="+keyword+"&id="+str(id),"")
 
+        t1 = time.time()
         img_array = np.frombuffer(res.content, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         segSize = (img_cv.shape[0], img_cv.shape[1])
@@ -62,6 +63,8 @@ def processingthread():
             scores = segmentation_module(singleton_batch, segSize=segSize)
         _, pred = torch.max(scores, dim=1)
         pred = pred.cpu()[0].numpy().astype('int8')
+        t2 = time.time()
+        print("Segmentation Processing = %s : %f" % (id, t2-t1))
 
         cv2.imshow('seg', pred)
         cv2.waitKey(1)
@@ -126,6 +129,13 @@ if __name__ == "__main__":
         help="path to config file",
         type=str,
     )
+    parser.add_argument(
+        "opts",
+        help="Modify config options using the command-line",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
+    ##segmentation arguments
 
     opt = parser.parse_args()
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
