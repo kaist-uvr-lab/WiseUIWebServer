@@ -48,6 +48,7 @@ def processingthread():
 
         img_array = np.frombuffer(res.content, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        segSize = (img_cv.shape[0], img_cv.shape[1])
 
         pil_to_tensor = torchvision.transforms.Compose([
             torchvision.transforms.ToTensor(),
@@ -62,7 +63,7 @@ def processingthread():
         _, pred = torch.max(scores, dim=1)
         pred = pred.cpu()[0].numpy().astype('int8')
 
-        cv2.imshow('img', img_cv)
+        cv2.imshow('seg', pred)
         cv2.waitKey(1)
         # processing end
 
@@ -116,10 +117,50 @@ if __name__ == "__main__":
     parser.add_argument(
         '--ECHO_SERVER_PORT', type=int, default=35001,
         help='port number')
+
+    ##segmentation arguments
+    parser.add_argument(
+        "--cfg",
+        default="config/ade20k-resnet50dilated-ppm_deepsup.yaml",
+        metavar="FILE",
+        help="path to config file",
+        type=str,
+    )
+
     opt = parser.parse_args()
     device = torch.device("cuda:"+opt.use_gpu) if torch.cuda.is_available() else torch.device("cpu")
 
     print('Starting the API')
+
+    ####segmentation module configuration
+    cfg.merge_from_file(opt.cfg)
+    cfg.merge_from_list(opt.opts)
+
+    cfg.MODEL.arch_encoder = cfg.MODEL.arch_encoder.lower()
+    cfg.MODEL.arch_decoder = cfg.MODEL.arch_decoder.lower()
+
+    # absolute paths of model weights
+    cfg.MODEL.weights_encoder = os.path.dirname(os.path.realpath(__file__)) + '/model/encoder_' + cfg.TEST.checkpoint
+    cfg.MODEL.weights_decoder = os.path.dirname(os.path.realpath(__file__)) + '/model/decoder_' + cfg.TEST.checkpoint
+
+    assert os.path.exists(cfg.MODEL.weights_encoder) and \
+           os.path.exists(cfg.MODEL.weights_decoder), "checkpoint does not exitst!"
+
+    # Network Builders
+    net_encoder = ModelBuilder.build_encoder(
+        arch=cfg.MODEL.arch_encoder,
+        fc_dim=cfg.MODEL.fc_dim,
+        weights=cfg.MODEL.weights_encoder)
+    net_decoder = ModelBuilder.build_decoder(
+        arch=cfg.MODEL.arch_decoder,
+        fc_dim=cfg.MODEL.fc_dim,
+        num_class=cfg.DATASET.num_class,
+        weights=cfg.MODEL.weights_decoder,
+        use_softmax=True)
+
+    crit = torch.nn.NLLLoss(ignore_index=-1)
+    segmentation_module = SegmentationModule(net_encoder, net_decoder, crit).eval().to(device)
+    ####segmentation module configuration
 
     Data = {}
     msgqueue = []
