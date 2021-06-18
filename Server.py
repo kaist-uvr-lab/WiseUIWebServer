@@ -8,10 +8,18 @@ import cv2
 from socket import *
 from module.Message import Message
 import argparse
-import torch
+import torch, torchvision
 
 #WSGI
 from gevent.pywsgi import WSGIServer
+
+##CSAILVision
+from mit_semseg.dataset import TestDataset
+from mit_semseg.models import ModelBuilder, SegmentationModule
+from mit_semseg.utils import colorEncode, find_recursive, setup_logger
+from mit_semseg.lib.nn import user_scattered_collate, async_copy_to
+from mit_semseg.lib.utils import as_numpy
+from mit_semseg.config import cfg
 
 ##################################################
 # API part
@@ -41,9 +49,18 @@ def processingthread():
         img_array = np.frombuffer(res.content, dtype=np.uint8)
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
-        Data[keyword][id] ={}
-        Data[keyword][id]['data'] = img_cv
-        Data[keyword][id]['src']  = src
+        pil_to_tensor = torchvision.transforms.Compose([
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],  # These are RGB mean+std values
+                std=[0.229, 0.224, 0.225])  # across a large photo dataset.
+        ])
+        img_data = pil_to_tensor(img_cv)
+        singleton_batch = {'img_data': img_data[None].cuda()}
+        with torch.no_grad():
+            scores = segmentation_module(singleton_batch, segSize=segSize)
+        _, pred = torch.max(scores, dim=1)
+        pred = pred.cpu()[0].numpy().astype('int8')
 
         cv2.imshow('img', img_cv)
         cv2.waitKey(1)
