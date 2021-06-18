@@ -1,3 +1,4 @@
+model/*.pth
 .idea/*.xml
 *.pyc
 module/__pycache__
