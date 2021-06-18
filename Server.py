@@ -65,10 +65,16 @@ def udpthread():
 if __name__ == "__main__":
 
     ##################################################
-    ##arguments
+    ##basic arguments
     parser = argparse.ArgumentParser(
         description='WISE UI Web Server',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument(
+        '--RKeywords', type=str,
+        help='Received keyword lists')
+    parser.add_argument(
+        '--SKeywords', type=str,
+        help='Sendeded keyword lists')
     parser.add_argument(
         '--ip', type=str,default='0.0.0.0',
         help='ip address')
@@ -103,8 +109,8 @@ if __name__ == "__main__":
 
     ##Echo server
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
-    ReceivedKeywords=['Image','Matching']
-    SendKeywords = 'Keypoints, Descriptors, Matches'
+    ReceivedKeywords= opt.RKeywords.split(',')
+    SendKeywords = opt.SKeywords
     sess = requests.Session()
     sess.post(FACADE_SERVER_ADDR + "/Connect", ujson.dumps({
         #'port':opt.port,'key': keyword, 'prior':opt.prior, 'ratio':opt.ratio
