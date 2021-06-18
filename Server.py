@@ -46,20 +46,50 @@ def processingthread():
             img_array = np.frombuffer(res.content, dtype=np.uint8)
             img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
             img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+            ##Opticalflow test
+
+            ##Opticalflow test
+
+            """
+            ##Suplerglue test
             t1 = time.time()
             frame_tensor = frame2tensor(img, device)
             t2 = time.time()
 
             t3 = time.time()
             last_data = matching.superpoint({'image': frame_tensor})
+            last_data['image'] = frame_tensor
             t4 = time.time()
-            last_data = {key + '3': last_data[key] for key in SuperPointKeywords}
-            t5 = time.time()
+
+            #last_data = {key + '3': last_data[key] for key in SuperPointKeywords}
+            #t5 = time.time()
+
+            Data['Frame'][id] = last_data
+            fids = list(Data['Frame'].keys())
+            if len(fids) > 20:
+                del Data['Frame'][fids[0]]
+
+            tmatch = 0.0
+            if len(fids) > 4:
+                data1 = Data['Frame'][fids[-2]]
+                data2 = Data['Frame'][fids[-1]]
+                data1 = {key + '0': data1[key] for key in SuperPointKeywords}
+                data2 = {key + '1': data2[key] for key in SuperPointKeywords}
+
+                t5 = time.time()
+                pred = matching({**data1, **data2})
+                t6 = time.time()
+                tmatch = t6-t5
+            ##Suplerglue test
+            """
 
             Data[keyword][id] = {}
             Data[keyword][id]['rgb'] = img_cv
             Data[keyword][id]['gray'] = img
             Data[keyword][id]['src'] = src
+
+
             """
             desc = last_data['descriptors'][0].cpu().detach().numpy()
             kpts = last_data['keypoints'][0].cpu().detach().numpy()
@@ -73,7 +103,7 @@ def processingthread():
         elif keyword == 'Matching':
             print('Matching')
         end = time.time()
-        print("Super Point Processing = %s : %f %f %f = %f" % (id, end - start, t2-t1, t4-t3, t5-t4))
+        #print("Super Point Processing = %s : %f %f %f = %f" % (id, end - start, t2-t1, t4-t3, tmatch))
 
         cv2.imshow('img', img_cv)
         cv2.waitKey(1)
@@ -214,7 +244,15 @@ if __name__ == "__main__":
         }
     }
     matching = Matching(config).eval().to(device)
-    SuperPointKeywords = ['keypoints', 'scores', 'descriptors']
+    SuperPointKeywords = ['keypoints', 'scores', 'descriptors','image']
+    ##LOAD SuperGlue & SuperPoint
+
+    ##Opticalflow
+    lk_params = dict(winSize=(15, 15),
+                     maxLevel=0,
+                     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
+    ##Opticalflow
 
     Data = {}
     msgqueue = []
@@ -234,6 +272,7 @@ if __name__ == "__main__":
         temp = ujson.dumps({'type1':'connect', 'keyword':keyword, 'src':'FeatureServer', 'type2':'all'})
         ECHO_SOCKET.sendto(temp.encode(), ECHO_SERVER_ADDR)
         Data[keyword]={}
+    Data['Frame'] = {}
     #Echo server connect
 
     ConditionVariable = threading.Condition()
