@@ -26,6 +26,13 @@ app = Flask(__name__)
 
 import os
 def processingthread():
+
+    ##optical flow
+    old_gray = None
+    mask = None
+    p0 = None
+    bOpt = False
+
     print("Start Message Processing Thread")
     while True:
         ConditionVariable.acquire()
@@ -47,29 +54,19 @@ def processingthread():
             img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
             img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
 
-            ##Opticalflow test
-
-            ##Opticalflow test
-
-            """
-            ##Suplerglue test
-            t1 = time.time()
+            ##super point
             frame_tensor = frame2tensor(img, device)
-            t2 = time.time()
-
-            t3 = time.time()
             last_data = matching.superpoint({'image': frame_tensor})
             last_data['image'] = frame_tensor
-            t4 = time.time()
+            ##super point
 
-            #last_data = {key + '3': last_data[key] for key in SuperPointKeywords}
-            #t5 = time.time()
 
-            Data['Frame'][id] = last_data
-            fids = list(Data['Frame'].keys())
+            ##Suplerglue test
+            #Data['Frame'][id] = last_data
+            fids = list(Data[keyword].keys())
+            """
             if len(fids) > 20:
                 del Data['Frame'][fids[0]]
-
             tmatch = 0.0
             if len(fids) > 4:
                 data1 = Data['Frame'][fids[-2]]
@@ -84,11 +81,77 @@ def processingthread():
             ##Suplerglue test
             """
 
+            topt_s = time.time()
             Data[keyword][id] = {}
             Data[keyword][id]['rgb'] = img_cv
             Data[keyword][id]['gray'] = img
             Data[keyword][id]['src'] = src
 
+            kpts = last_data['keypoints'][0].cpu().detach().numpy()
+
+            if bOpt is not True or id % 3 == 0:
+                old_gray = img.copy()
+                mask = np.zeros_like(img_cv)
+                bOpt = True
+                p0 = kpts.reshape(-1, 1, 2)
+                i0 = np.arange(len(p0)).reshape(-1,1,1)
+
+            if id % 3 is not 0:
+                frame = img_cv.copy()
+                frame_gray = img.copy()
+                p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
+
+                good_new = p1[st == 1]
+                good_old = p0[st == 1]
+                good_idx = i0[st == 1]
+                print(len(good_new))
+                # draw the tracks
+                for i, (new, old) in enumerate(zip(good_new, good_old)):
+                    a, b = new.ravel()
+                    c, d = old.ravel()
+                    idx = int(good_idx[i])
+                    mask = cv2.line(mask, (a, b), (c, d), color[idx].tolist(), 2)
+                    frame = cv2.circle(frame, (a, b), 3, color[idx].tolist(), -1)
+
+                oimg = cv2.add(frame, mask)
+                cv2.imshow('frame', oimg)
+                cv2.waitKey(1)
+                old_gray = frame_gray.copy()
+                p0 = good_new.reshape(-1, 1, 2)
+                i0 = good_idx.reshape(-1, 1, 1)
+            """
+            if len(fids) > 2:
+
+                old_gray = Data[keyword][fids[-2]]['gray']
+                frame_gray = Data[keyword][fids[-1]]['gray']
+                mask = np.zeros_like(img_cv)
+                frame = img_cv.copy()
+                n1 = kpts.shape[0]
+                n2 = kpts.shape[1]
+                p1 = kpts.reshape(n1, 1, n2)
+
+                p0, st, err = cv2.calcOpticalFlowPyrLK(frame_gray, old_gray, p1, None, **lk_params)
+                print(p1[30])
+                print(kpts[30])
+
+                good_new = p1[st == 1]
+                good_old = p0[st == 1]
+
+                # draw the tracks
+                for i, (new, old) in enumerate(zip(good_new, good_old)):
+                    a, b = new.ravel()
+                    c, d = old.ravel()
+                    mask = cv2.line(mask, (a, b), (c, d), color[i].tolist(), 2)
+                    frame = cv2.circle(frame, (a, b), 5, color[i].tolist(), -1)
+                oimg = cv2.add(frame, mask)
+                cv2.imshow('frame', oimg)
+                cv2.waitKey(1)
+            """
+
+            topt_e = time.time()
+            ##Opticalflow test
+
+            ##Opticalflow test
 
             """
             desc = last_data['descriptors'][0].cpu().detach().numpy()
@@ -103,7 +166,7 @@ def processingthread():
         elif keyword == 'Matching':
             print('Matching')
         end = time.time()
-        #print("Super Point Processing = %s : %f %f %f = %f" % (id, end - start, t2-t1, t4-t3, tmatch))
+        print("Super Point Processing = %s : %f %f" % (id, end - start, topt_e-topt_s))
 
         cv2.imshow('img', img_cv)
         cv2.waitKey(1)
@@ -251,7 +314,7 @@ if __name__ == "__main__":
     lk_params = dict(winSize=(15, 15),
                      maxLevel=0,
                      criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-
+    color = np.random.randint(0, 255, (500, 3))
     ##Opticalflow
 
     Data = {}
