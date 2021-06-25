@@ -80,6 +80,38 @@ def work1():
         bytesAddressPair = UDPServerSocket.recvfrom(bufferSize)
         message = bytesAddressPair[0]
         address = bytesAddressPair[1]
+        print(message)
+        data = ujson.loads(message.decode())
+        method = data['type1']
+        keyword = data['keyword']
+
+        if method == 'connect':
+
+            if keyword not in KeywordAddrLists:
+                KeywordAddrLists[keyword] = {} #set()  # = {}
+                KeywordAddrLists[keyword]['all'] = set()
+            multi = data['type2']
+            src = data['src']
+            if multi == 'single':
+               KeywordAddrLists[keyword][src] = address
+            else:
+                KeywordAddrLists[keyword]['all'].add(address)
+            #print('%s %s %s' % (method, keyword, multi))
+        elif method == 'notification':
+            if keyword in KeywordAddrLists:
+                id = data['id']
+                src = data['src']
+                json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'id': id, 'src':src})
+                for addr in KeywordAddrLists[keyword]['all']:
+                    UDPServerSocket.sendto(json_data.encode(), addr)
+                addr = KeywordAddrLists[keyword].get(src)
+                if addr is not None:
+                    UDPServerSocket.sendto(json_data.encode(), addr)
+
+        #print(KeywordAddrLists)
+        #    KeywordAddrLists = {}
+
+        continue
         if len(message)==4:
             code, = struct.unpack('<f', message)
             #code = float.from_bytes(message, byteorder='little', signed=True)
@@ -134,26 +166,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '--port', type=int, default=35001,
         help='port number')
-    """
-    parser.add_argument(
-        '--SLAM_SERVER', type=str,
-        help='http://xxx.xxx.xxx.xxx:xxxx')
 
-    parser.add_argument(
-        '--DEPTH_SERVER', type=str,
-        help='http://xxx.xxx.xxx.xxx:xxxx')
-
-    parser.add_argument(
-    '--SEGMENTATION_SERVER', type=str,
-        help='http://xxx.xxx.xxx.xxx:xxxx')
-
-    parser.add_argument(
-        '--MAP', type=str,
-        help='load map name')
-    """
     opt = parser.parse_args()
     # run echo server
     print("Run Echo Server")
+
+    KeywordAddrLists = {}
 
     ConnectedAddrList = {}
     ManagerAddr = None
