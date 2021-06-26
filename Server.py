@@ -38,6 +38,7 @@ def processingthread():
         ConditionVariable.acquire()
         ConditionVariable.wait()
         message = msgqueue.pop()
+        msgqueue.clear()
         ConditionVariable.release()
         # 처리 시작
 
@@ -49,22 +50,99 @@ def processingthread():
 
         res =sess.post(FACADE_SERVER_ADDR + "/Load?keyword="+keyword+"&id="+str(id),"")
 
+        if src not in Data[keyword]['src']:
+            Data[keyword]['src'].add(src)
+            Data[keyword][src] = {}
+
         if keyword == 'Image':
             img_array = np.frombuffer(res.content, dtype=np.uint8)
             img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
             img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
 
+
+            fids = list(Data[keyword][src].keys())
+            Data[keyword][src][id] = {}
+            Data[keyword][src][id]['rgb'] = img_cv
+            Data[keyword][src][id]['gray'] = img
+
             ##super point
             frame_tensor = frame2tensor(img, device)
             last_data = matching.superpoint({'image': frame_tensor})
             last_data['image'] = frame_tensor
+            kpts = last_data['keypoints'][0].cpu().detach().numpy()
+            desc = last_data['descriptors'][0].cpu().detach().numpy()
+            Data[keyword][src][id]['Descriptors'] = desc.transpose()
+            Data[keyword][src][id]['Keypoints'] = kpts
+            strid = str(id)
+            sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Keypoints&id=" + strid + "&src=" + src, kpts.tobytes())
+            sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Descriptors&id=" + strid + "&src=" + src,
+                      desc.transpose().tobytes())
             ##super point
 
+            if len(fids) % 3 == 0:
 
+                ##optical flow
+                """
+                old_gray = img.copy()
+                mask = np.zeros_like(img_cv)
+                p0 = kpts.reshape(-1, 1, 2)
+                i0 = np.arange(len(p0)).reshape(-1, 1, 1)
+                """
+                ##optical flow
+
+
+                """
+                ##orb
+                kp1, des1 = orb.detectAndCompute(img, None)
+                ##orb
+                frame = img_cv.copy()
+                for i in range(0, len(kp1)):
+                    x1, y1 = kp1[i].pt
+                    frame = cv2.circle(frame, (int(x1), int(y1)), 3, (255,0,0), -1)
+                for i in range(0, len(kpts)):
+                    frame = cv2.circle(frame, (kpts[i][0], kpts[i][1]), 2, color[i].tolist(), -1)
+                cv2.imshow("feature="+src,frame)
+                cv2.waitKey(1)
+                """
+
+                """
+                ##desc matching
+                if len(fids) > 3:
+                    id1 = id
+                    id2 = fids[-3]
+                    desc1 = Data[keyword][src][id1]['Descriptors']
+                    desc2 = Data[keyword][src][id2]['Descriptors']
+                    pts1 = Data[keyword][src][id1]['Keypoints']
+                    pts2 = Data[keyword][src][id2]['Keypoints']
+                    pts_new = np.zeros(pts1.shape, dtype = pts1.dtype)
+                    matches = desc_matcher.knnMatch(desc1, desc2, k=2)
+                    good = np.zeros([(len(matches)),1], dtype=np.int8)
+
+                    for i, (m, n) in enumerate(matches):
+                        if m.distance < 0.7 * n.distance:
+                            pts_new[i] = pts2[m.trainIdx]
+                            good[i] = 1
+                        else:
+                            good[i] = 0
+                    pts1 = pts1.reshape(-1,1,2)
+                    pts_new = pts_new.reshape(-1, 1, 2)
+                    pts_old = pts1[good==1]
+                    pts_new = pts_new[good == 1]
+
+                    # draw the tracks
+                    frame = img_cv.copy()
+                    for i, (new, old) in enumerate(zip(pts_new, pts_old)):
+                        a, b = new.ravel()
+                        c, d = old.ravel()
+                        frame = cv2.line(frame, (a, b), (c, d), color[i].tolist(), 2)
+
+                    cv2.imshow('desc=' + src, frame)
+                    cv2.waitKey(1)
+                ##desc matching
+                """
+            """
             ##Suplerglue test
             #Data['Frame'][id] = last_data
-            fids = list(Data[keyword].keys())
-            """
             if len(fids) > 20:
                 del Data['Frame'][fids[0]]
             tmatch = 0.0
@@ -82,21 +160,26 @@ def processingthread():
             """
 
             topt_s = time.time()
+            """
             Data[keyword][id] = {}
             Data[keyword][id]['rgb'] = img_cv
             Data[keyword][id]['gray'] = img
             Data[keyword][id]['src'] = src
+            """
 
-            kpts = last_data['keypoints'][0].cpu().detach().numpy()
+            #Data[keyword][id]['src'] = src
 
+            """
             if bOpt is not True or id % 3 == 0:
                 old_gray = img.copy()
                 mask = np.zeros_like(img_cv)
                 bOpt = True
                 p0 = kpts.reshape(-1, 1, 2)
                 i0 = np.arange(len(p0)).reshape(-1,1,1)
-
-            if id % 3 is not 0:
+            """
+            """
+            ##Optical flow matching
+            if len(fids) % 3 is not 0:
                 frame = img_cv.copy()
                 frame_gray = img.copy()
                 p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
@@ -104,7 +187,7 @@ def processingthread():
                 good_new = p1[st == 1]
                 good_old = p0[st == 1]
                 good_idx = i0[st == 1]
-                print(len(good_new))
+                print("%d %d"%(id, len(good_new)))
                 # draw the tracks
                 for i, (new, old) in enumerate(zip(good_new, good_old)):
                     a, b = new.ravel()
@@ -114,11 +197,13 @@ def processingthread():
                     frame = cv2.circle(frame, (a, b), 3, color[idx].tolist(), -1)
 
                 oimg = cv2.add(frame, mask)
-                cv2.imshow('frame', oimg)
+                cv2.imshow('opticalflow='+src, oimg)
                 cv2.waitKey(1)
                 old_gray = frame_gray.copy()
                 p0 = good_new.reshape(-1, 1, 2)
                 i0 = good_idx.reshape(-1, 1, 1)
+            ##Optical flow matching
+            """
             """
             if len(fids) > 2:
 
@@ -164,12 +249,25 @@ def processingthread():
             """
 
         elif keyword == 'Matching':
-            print('Matching')
-        end = time.time()
-        print("Super Point Processing = %s : %f %f" % (id, end - start, topt_e-topt_s))
+            id2 = int(res.content)
+            desc1 = Data[keyword][src][id]['Descriptors']
+            desc2 = Data[keyword][src][id2]['Descriptors']
 
-        cv2.imshow('img', img_cv)
-        cv2.waitKey(1)
+            matches = desc_matcher.knnMatch(desc1, desc2, k=2)
+            good = np.zeros([(len(matches)), 1], dtype=np.int32)
+
+            for i, (m, n) in enumerate(matches):
+                if m.distance < 0.7 * n.distance:
+                    good[i] = m.trainIdx
+                else:
+                    good[i] = -1
+            sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Matches&id=" + strid + "&src=" + src, good.tobytes())
+
+        end = time.time()
+        print("Super Point Processing = %s = %d : %f %f" % (id, len(msgqueue), end - start, topt_e-topt_s))
+
+        #cv2.imshow('img='+src, img_cv)
+        #cv2.waitKey(1)
         # processing end
 
 bufferSize = 1024
@@ -310,6 +408,31 @@ if __name__ == "__main__":
     SuperPointKeywords = ['keypoints', 'scores', 'descriptors','image']
     ##LOAD SuperGlue & SuperPoint
 
+    ##ORB
+    orb = cv2.ORB_create(
+        nfeatures=5000,
+        scaleFactor=1.2,
+        nlevels=8,
+        edgeThreshold=31,
+        firstLevel=0,
+        WTA_K=2,
+        scoreType=cv2.ORB_HARRIS_SCORE,
+        patchSize=31,
+        fastThreshold=20,
+    )
+    ##ORB
+
+    ##Descriptor-based matching
+    #flann-based
+    FLANN_INDEX_KDTREE = 0
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict(checks=50)  # or pass empty dictionary
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    #bf-based
+    bf = cv2.BFMatcher()
+    desc_matcher = bf
+    ##Descriptor-based matching
+
     ##Opticalflow
     lk_params = dict(winSize=(15, 15),
                      maxLevel=0,
@@ -335,6 +458,7 @@ if __name__ == "__main__":
         temp = ujson.dumps({'type1':'connect', 'keyword':keyword, 'src':'FeatureServer', 'type2':'all'})
         ECHO_SOCKET.sendto(temp.encode(), ECHO_SERVER_ADDR)
         Data[keyword]={}
+        Data[keyword]['src'] = set()
     Data['Frame'] = {}
     #Echo server connect
 
