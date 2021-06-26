@@ -37,17 +37,15 @@ def processingthread():
     while True:
         ConditionVariable.acquire()
         ConditionVariable.wait()
-        message = msgqueue.pop()
-        msgqueue.clear()
+        data = msgqueue.pop()
         ConditionVariable.release()
-        # 처리 시작
+
 
         start = time.time()
-        data = ujson.loads(message.decode())
+        # 처리 시작
         id = data['id']
         keyword = data['keyword']
         src = data['src']
-
         res =sess.post(FACADE_SERVER_ADDR + "/Load?keyword="+keyword+"&id="+str(id),"")
 
         if src not in Data[keyword]['src']:
@@ -265,9 +263,6 @@ def processingthread():
 
         end = time.time()
         print("Super Point Processing = %s = %d : %f %f" % (id, len(msgqueue), end - start, topt_e-topt_s))
-
-        #cv2.imshow('img='+src, img_cv)
-        #cv2.waitKey(1)
         # processing end
 
 bufferSize = 1024
@@ -276,9 +271,8 @@ def udpthread():
     while True:
         bytesAddressPair = ECHO_SOCKET.recvfrom(bufferSize)
         message = bytesAddressPair[0]
-        #address = bytesAddressPair[1]
-        print(message)
-        msgqueue.append(message)
+        data = ujson.loads(message.decode())
+        msgqueue.append(data)
         ConditionVariable.acquire()
         ConditionVariable.notify()
         ConditionVariable.release()
