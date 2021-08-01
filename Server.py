@@ -40,61 +40,70 @@ def Disconnect():
     return ''
 @app.route("/Connect", methods=['POST'])
 def Connect():
-    #print(request.remote_addr)
-    #print(request.environ['REMOTE_PORT'])
+
     data = ujson.loads(request.data)
     Tempkeywords = data['keyword'].split(',')
     method = data['type1'] #server, device
     type2 = data['type2']
 
     for keyword in Tempkeywords:
-
+        print("%s %s %s"%(keyword, method, type2))
         if keyword not in Keywords:
             Keywords.add(keyword)
             Data[keyword] = {}
             if type2 == "raw":
-                Data[keyword]['id'] = 0
+                Data[keyword]['id'] = int(0)
             else:
-                Data[keyword]['id'] = -1
-
-    return ''
+                Data[keyword]['id'] = int(-1)
+    return 'a'
 
 @app.route("/Store", methods=['POST'])
 def Store():
 
     keyword = request.args.get('keyword')
-    id2 = int(request.args.get('id'))
+    id1 = int(request.args.get('id'))
+    id2 = int(request.args.get('id2',-1))
     src = request.args.get('src')
-    #data = ujson.loads(request.data)
-    #keyword = data['keyword']
-
+    type2 = request.args.get('type2','None')
+    """
+    if keyword == 'Matching':
+        print(type2)
+    if keyword == "Matches":
+        print("1 Matches id %d %d"%(id1, id2))
+    """
     if keyword in Keywords:
+        tid = int(Data[keyword]['id']+1)
+        if tid == 0:
+            tid = id1
+        else:
+            Data[keyword]['id'] = tid
+        id1 = tid
+        Data[keyword]['src'] = src  # data['src']
+        if id2 >= 0:
+            id = str(tid)+","+str(id2)
+            Data[keyword][id] = request.data
+            json_str = {'keyword': keyword, 'type1': 'notification', 'id': tid, 'id2':id2, 'type2':type2, 'src': src}
+        else:
+            Data[keyword][tid] = request.data
+            json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': tid, 'src': src}
 
-        id = Data[keyword]['id']+1
-        if id == 0:
-            id = id2
-        Data[keyword]['id'] = id
-        Data[keyword][id] = request.data
-        Data[keyword]['src'] = src #data['src']
-        #src = data['src']
-
-        json_data = ujson.dumps({'keyword':keyword, 'type1':'notification','id':id, 'src':src})
+        json_data = ujson.dumps(json_str)
         udp_manage_soc.sendto(json_data.encode(), CONTENT_ECHO_SERVER_ADDR)
 
         #print(data['data'])
-    return ''
+    return str(id1).encode()
 
 @app.route("/Load", methods=['POST'])
 def Load():
-    #data = ujson.loads(request.data)
-    #keyword = data['keyword']
     keyword = request.args.get('keyword')
-    id = int(request.args.get('id'))
-    #src = request.args.get('src')
+    id1 = int(request.args.get('id'))
+    id2 = int(request.args.get('id2', -1))
     if keyword in Keywords:
-        #id = data['id']
-        #print(len(Data[keyword][id]))
-        return bytes(Data[keyword][id])
+        if id2 >= 0:
+            id = str(id1) + "," + str(id2)
+            return bytes(Data[keyword][id])
+        else:
+            return bytes(Data[keyword][id1])
     return ''
 ###########################################################################################################################
 
