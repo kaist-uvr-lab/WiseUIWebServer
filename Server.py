@@ -51,10 +51,12 @@ def Connect():
         if keyword not in Keywords:
             Keywords.add(keyword)
             Data[keyword] = {}
+            """
             if type2 == "raw":
                 Data[keyword]['id'] = int(0)
             else:
                 Data[keyword]['id'] = int(-1)
+            """
     return 'a'
 
 @app.route("/Store", methods=['POST'])
@@ -72,38 +74,45 @@ def Store():
         print("1 Matches id %d %d"%(id1, id2))
     """
     if keyword in Keywords:
+        if Data[keyword].get(src) is None:
+            Data[keyword][src] = {}
+        """
         tid = int(Data[keyword]['id']+1)
         if tid == 0:
             tid = id1
         else:
             Data[keyword]['id'] = tid
         id1 = tid
+        """
+        """
         Data[keyword]['src'] = src  # data['src']
         if id2 >= 0:
             id = str(tid)+","+str(id2)
             Data[keyword][id] = request.data
             json_str = {'keyword': keyword, 'type1': 'notification', 'id': tid, 'id2':id2, 'type2':type2, 'src': src}
         else:
-            Data[keyword][tid] = request.data
-            json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': tid, 'src': src}
-
+       """
+        Data[keyword][src][id1] = request.data
+        json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id1, 'src': src}
         json_data = ujson.dumps(json_str)
         udp_manage_soc.sendto(json_data.encode(), CONTENT_ECHO_SERVER_ADDR)
-
         #print(data['data'])
-    return str(id1).encode()
+    return 'a'#str(id1).encode()
 
 @app.route("/Load", methods=['POST'])
 def Load():
     keyword = request.args.get('keyword')
     id1 = int(request.args.get('id'))
     id2 = int(request.args.get('id2', -1))
+    src = request.args.get('src')
     if keyword in Keywords:
+        """
         if id2 >= 0:
             id = str(id1) + "," + str(id2)
             return bytes(Data[keyword][id])
         else:
-            return bytes(Data[keyword][id1])
+        """
+        return bytes(Data[keyword][src][id1])
     return ''
 ###########################################################################################################################
 
