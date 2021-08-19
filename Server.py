@@ -80,28 +80,38 @@ def work1():
         bytesAddressPair = UDPServerSocket.recvfrom(bufferSize)
         message = bytesAddressPair[0]
         address = bytesAddressPair[1]
-        print(message)
+        #print(address, message)
         data = ujson.loads(message.decode())
         method = data['type1']
         keyword = data['keyword']
-
+        src = data['src']
         if method == 'connect':
-
+            print(address)
             if keyword not in KeywordAddrLists:
                 KeywordAddrLists[keyword] = {} #set()  # = {}
                 KeywordAddrLists[keyword]['all'] = set()
             multi = data['type2']
-            src = data['src']
             if multi == 'single':
-               KeywordAddrLists[keyword][src] = address
+                KeywordAddrLists[keyword][src] = address
             else:
                 KeywordAddrLists[keyword]['all'].add(address)
             #print('%s %s %s' % (method, keyword, multi))
+        elif method == 'disconnect':
+            multi = data['type2']
+            if multi == 'single':
+               KeywordAddrLists[keyword].pop(src)
+            else:
+                KeywordAddrLists[keyword]['all'].remove(address)
         elif method == 'notification':
             if keyword in KeywordAddrLists:
                 id = data['id']
-                src = data['src']
-                json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'id': id, 'src':src})
+                #src = data['src']
+                type2 = data['type2']
+                if 'id2' in data:
+                    id2 = data['id2']
+                    json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id, 'id2':id2, 'src': src})
+                else:
+                    json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id, 'src': src})
                 for addr in KeywordAddrLists[keyword]['all']:
                     UDPServerSocket.sendto(json_data.encode(), addr)
                 addr = KeywordAddrLists[keyword].get(src)
