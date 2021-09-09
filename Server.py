@@ -93,7 +93,10 @@ def Store():
         else:
        """
         Data[keyword][src][id1] = request.data
-        json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id1, 'src': src}
+        if id2 == -1:
+            json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id1, 'src': src}
+        else:
+            json_str = {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id1, 'id2':id2, 'src': src}
         json_data = ujson.dumps(json_str)
         udp_manage_soc.sendto(json_data.encode(), CONTENT_ECHO_SERVER_ADDR)
         #print(data['data'])
