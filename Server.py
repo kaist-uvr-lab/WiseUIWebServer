@@ -10,6 +10,7 @@ from module.Message import Message
 import argparse
 import torch
 
+from superglue.SuperPointFeature2D import SuperPointFeature2D
 from superglue.matching import Matching
 from superglue.utils import (frame2tensor, keyframe2tensor)
 
@@ -25,7 +26,19 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 import os
-def processingthread():
+def matchingthread():
+    while True:
+        if len(msgqueue2) == 0:
+            continue
+        data = msgqueue2.pop(0)
+        id1 = data['id']
+        keyword = data['keyword']
+        src = data['src']
+        res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=" + keyword + "&id=" + str(id1), "")
+        id2 = int(res.content)
+        print("%s %d %d"%(keyword, id1, id2))
+
+def processingthread(Data):
 
     ##optical flow
     old_gray = None
@@ -36,10 +49,75 @@ def processingthread():
     print("Start Message Processing Thread")
     while True:
         ConditionVariable.acquire()
+        datas = []
+        while len(msgqueue1) > 0:
+            datas.append(msgqueue1.pop(0))
         ConditionVariable.wait()
-        data = msgqueue.pop()
-        ConditionVariable.release()
 
+        for data in datas:
+            id = data['id']
+            strid = str(id)
+            keyword = data['keyword']
+            src = data['src']
+            type2 = data['type2']
+
+            #res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=" + keyword + "&id=" + str(id), "")
+            if keyword == "Matching":
+                id2 = data['id2']
+                desc1 = Data["Image"][id]['Descriptors']
+                desc2 = Data["Image"][id2]['Descriptors']
+                print("%s %d %d" % (keyword, id, id2))
+                matches = desc_matcher.knnMatch(desc1, desc2, k=2)
+                good = np.zeros([(len(matches)), 1], dtype=np.int32)
+
+                for i, (m, n) in enumerate(matches):
+                    if m.distance < 0.7 * n.distance:
+                        good[i] = m.trainIdx
+                    else:
+                        good[i] = -1
+                sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Matches&type2="+type2+"&id=" + strid +"&id2="+str(id2)+ "&src=" + src, good.tobytes())
+
+
+            elif keyword == 'Image':
+                res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=" + keyword + "&id=" + str(id), "")
+                img_array = np.frombuffer(res.content, dtype=np.uint8)
+                img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+                #fids = list(Data[keyword].keys())
+                fdata = {}
+                Data[keyword][id] = fdata
+                Data[keyword][id]['rgb'] = img_cv
+                Data[keyword][id]['gray'] = img
+
+                a1 = time.time()
+                detector.detectAndCompute(img)
+                a2 = time.time()
+                print("Superpoint = %f"%(a2-a1))
+
+                """
+                ##super point
+                frame_tensor = frame2tensor(img, device)
+                with torch.no_grad():
+                    last_data = matching.superpoint({'image': frame_tensor})
+                    last_data['image'] = frame_tensor
+                    kpts = last_data['keypoints'][0].cpu().detach().numpy()
+                    desc = last_data['descriptors'][0].cpu().detach().numpy()
+                    Data[keyword][id]['Descriptors'] = desc.transpose()
+                    Data[keyword][id]['Keypoints'] = kpts
+
+                sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Keypoints&id=" + strid + "&src=" + src, kpts.tobytes())
+                sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Descriptors&id=" + strid + "&src=" + src,desc.transpose().tobytes())
+                ##super point
+                """
+
+        #print("queue %d"%(len(msgqueue1)))
+        continue
+
+        if len(msgqueue1) == 0:
+            continue
+        data = msgqueue1.pop(0)
+        #ConditionVariable.release()
 
         start = time.time()
         # 처리 시작
@@ -57,7 +135,6 @@ def processingthread():
             img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
             img = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
 
-
             fids = list(Data[keyword][src].keys())
             Data[keyword][src][id] = {}
             Data[keyword][src][id]['rgb'] = img_cv
@@ -73,8 +150,7 @@ def processingthread():
             Data[keyword][src][id]['Keypoints'] = kpts
             strid = str(id)
             sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Keypoints&id=" + strid + "&src=" + src, kpts.tobytes())
-            sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Descriptors&id=" + strid + "&src=" + src,
-                      desc.transpose().tobytes())
+            sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Descriptors&id=" + strid + "&src=" + src, desc.transpose().tobytes())
             ##super point
 
             if len(fids) % 3 == 0:
@@ -262,7 +338,7 @@ def processingthread():
             sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Matches&id=" + strid + "&src=" + src, good.tobytes())
 
         end = time.time()
-        print("Super Point Processing = %s = %d : %f %f" % (id, len(msgqueue), end - start, topt_e-topt_s))
+        print("Super Point Processing = %s = %d : %f %f" % (id, len(msgqueue1), end - start, topt_e-topt_s))
         # processing end
 
 bufferSize = 1024
@@ -272,10 +348,21 @@ def udpthread():
         bytesAddressPair = ECHO_SOCKET.recvfrom(bufferSize)
         message = bytesAddressPair[0]
         data = ujson.loads(message.decode())
-        msgqueue.append(data)
+
         ConditionVariable.acquire()
+        msgqueue1.append(data)
         ConditionVariable.notify()
         ConditionVariable.release()
+
+        """
+        if data['keyword'] == 'Image':
+            msgqueue1.append(data)
+        elif data['keyword'] == 'Matching':
+            msgqueue2.append(data)
+        """
+        #ConditionVariable.acquire()
+        #ConditionVariable.notify()
+        #ConditionVariable.release()
 
 if __name__ == "__main__":
 
@@ -343,7 +430,7 @@ if __name__ == "__main__":
         '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
         help='SuperGlue weights')
     parser.add_argument(
-        '--max_keypoints', type=int, default=500,
+        '--max_keypoints', type=int, default=1000,
         help='Maximum number of keypoints detected by Superpoint'
              ' (\'-1\' keeps all keypoints)')
     parser.add_argument(
@@ -398,8 +485,18 @@ if __name__ == "__main__":
             'match_threshold': opt.match_threshold,
         }
     }
-    matching = Matching(config).eval().to(device)
+    #matching = Matching(config).eval().to(device)
     SuperPointKeywords = ['keypoints', 'scores', 'descriptors','image']
+    detector = SuperPointFeature2D(True)
+
+    ##test
+    print("init start")
+    rgb = np.random.randint(255, size=(640, 480), dtype=np.uint8)
+    test_tesnsor = frame2tensor(rgb, device)
+    #detector.compute(rgb)
+    #matching.superpoint({'image': test_tesnsor})
+    print("init end")
+
     ##LOAD SuperGlue & SuperPoint
 
     ##ORB
@@ -435,7 +532,8 @@ if __name__ == "__main__":
     ##Opticalflow
 
     Data = {}
-    msgqueue = []
+    msgqueue1 = []
+    msgqueue2 = []
 
     ##Echo server
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
@@ -459,9 +557,11 @@ if __name__ == "__main__":
     ConditionVariable = threading.Condition()
 
     th1 = threading.Thread(target=udpthread)
-    th2 = threading.Thread(target=processingthread)
+    th2 = threading.Thread(target=processingthread, args=(Data,))
+    #th3 = threading.Thread(target=matchingthread)
     th1.start()
     th2.start()
+    #th3.start()
     # thread
 
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
