@@ -13,6 +13,9 @@ import torch, torchvision
 #WSGI
 from gevent.pywsgi import WSGIServer
 
+#Thread Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+
 ##CSAILVision
 from mit_semseg.dataset import TestDataset
 from mit_semseg.models import ModelBuilder, SegmentationModule
@@ -30,6 +33,30 @@ app = Flask(__name__)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
 import os
+
+#https://snowdeer.github.io/python/2017/11/13/python-producer-consumer-example/
+#https://docs.python.org/ko/3.7/library/concurrent.futures.html
+def processingthread2(message):
+    t1 = time.time()
+    data = ujson.loads(message.decode())
+    id = data['id']
+    src = data['src']
+    res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=Image"+"&id=" + str(id)+"&src="+src, "")
+    img_array = np.frombuffer(res.content, dtype=np.uint8)
+    img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    segSize = (img_cv.shape[0], img_cv.shape[1])
+    img_data = pil_to_tensor(img_cv)
+    singleton_batch = {'img_data': img_data[None].cuda()}
+    with torch.no_grad():
+        scores = segmentation_module(singleton_batch, segSize=segSize)
+    _, pred = torch.max(scores, dim=1)
+    pred = pred.cpu()[0].numpy().astype('int8')
+    t2 = time.time()
+    print("Segmentation Processing = %s : %f" % (id, t2-t1))
+    sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Segmentation&id=" + str(id) + "&src=" + src, pred.tobytes())
+    cv2.imshow('seg', pred)
+    cv2.waitKey(1)
+
 def processingthread():
     print("Start Message Processing Thread")
     while True:
@@ -51,12 +78,6 @@ def processingthread():
         img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         segSize = (img_cv.shape[0], img_cv.shape[1])
 
-        pil_to_tensor = torchvision.transforms.Compose([
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],  # These are RGB mean+std values
-                std=[0.229, 0.224, 0.225])  # across a large photo dataset.
-        ])
         img_data = pil_to_tensor(img_cv)
         singleton_batch = {'img_data': img_data[None].cuda()}
         with torch.no_grad():
@@ -78,11 +99,15 @@ def udpthread():
         message = bytesAddressPair[0]
         #address = bytesAddressPair[1]
         print(message)
-        msgqueue.append(message)
+
+        with ThreadPoolExecutor() as executor:
+            executor.submit(processingthread2, message)
+        """
         ConditionVariable.acquire()
+        msgqueue.append(message)
         ConditionVariable.notify()
         ConditionVariable.release()
-
+        """
 if __name__ == "__main__":
 
     ##################################################
@@ -168,8 +193,30 @@ if __name__ == "__main__":
         weights=cfg.MODEL.weights_decoder,
         use_softmax=True)
 
+    modules = []
     crit = torch.nn.NLLLoss(ignore_index=-1)
     segmentation_module = SegmentationModule(net_encoder, net_decoder, crit).eval().to(device)
+    segmentation_module2 = SegmentationModule(net_encoder, net_decoder, crit).eval().to(device)
+    modules.append(segmentation_module);
+    modules.append(segmentation_module2);
+
+    pil_to_tensor = torchvision.transforms.Compose([
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],  # These are RGB mean+std values
+            std=[0.229, 0.224, 0.225])  # across a large photo dataset.
+    ])
+
+    ##init
+    rgb = np.random.randint(255, size=(640, 480, 3), dtype=np.uint8)
+    tempsize = (rgb.shape[0], rgb.shape[1])
+    init_data = pil_to_tensor(rgb)
+    init_singleton_batch = {'img_data': init_data[None].cuda()}
+    with torch.no_grad():
+        segmentation_module(init_singleton_batch, segSize=tempsize)
+        segmentation_module2(init_singleton_batch, segSize=tempsize)
+    print("initialization!!")
+    ##init
     ####segmentation module configuration
 
     Data = {}
@@ -195,9 +242,9 @@ if __name__ == "__main__":
     ConditionVariable = threading.Condition()
 
     th1 = threading.Thread(target=udpthread)
-    th2 = threading.Thread(target=processingthread)
+    #th2 = threading.Thread(target=processingthread)
     th1.start()
-    th2.start()
+    #th2.start()
     # thread
 
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
