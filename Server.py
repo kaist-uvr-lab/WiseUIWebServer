@@ -196,9 +196,9 @@ if __name__ == "__main__":
     modules = []
     crit = torch.nn.NLLLoss(ignore_index=-1)
     segmentation_module = SegmentationModule(net_encoder, net_decoder, crit).eval().to(device)
-    segmentation_module2 = SegmentationModule(net_encoder, net_decoder, crit).eval().to(device)
+    #segmentation_module2 = SegmentationModule(net_encoder, net_decoder, crit).eval().to(device)
     modules.append(segmentation_module);
-    modules.append(segmentation_module2);
+    #modules.append(segmentation_module2);
 
     pil_to_tensor = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
@@ -214,7 +214,7 @@ if __name__ == "__main__":
     init_singleton_batch = {'img_data': init_data[None].cuda()}
     with torch.no_grad():
         segmentation_module(init_singleton_batch, segSize=tempsize)
-        segmentation_module2(init_singleton_batch, segSize=tempsize)
+        #segmentation_module2(init_singleton_batch, segSize=tempsize)
     print("initialization!!")
     ##init
     ####segmentation module configuration
