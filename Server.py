@@ -36,12 +36,12 @@ import os
 
 #https://snowdeer.github.io/python/2017/11/13/python-producer-consumer-example/
 #https://docs.python.org/ko/3.7/library/concurrent.futures.html
-def processingthread2(message):
+def processingthread(message):
     t1 = time.time()
     data = ujson.loads(message.decode())
     id = data['id']
     src = data['src']
-    res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=Image"+"&id=" + str(id)+"&src="+src, "")
+    res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword="+datatype+"&id=" + str(id)+"&src="+src, "")
     img_array = np.frombuffer(res.content, dtype=np.uint8)
     img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     segSize = (img_cv.shape[0], img_cv.shape[1])
@@ -57,40 +57,6 @@ def processingthread2(message):
     cv2.imshow('seg', pred)
     cv2.waitKey(1)
 
-def processingthread():
-    print("Start Message Processing Thread")
-    while True:
-        ConditionVariable.acquire()
-        ConditionVariable.wait()
-        message = msgqueue.pop()
-        ConditionVariable.release()
-        # 처리 시작
-
-        data = ujson.loads(message.decode())
-        id = data['id']
-        keyword = data['keyword']
-        src = data['src']
-
-        res =sess.post(FACADE_SERVER_ADDR + "/Load?keyword="+keyword+"&id="+str(id),"")
-
-        t1 = time.time()
-        img_array = np.frombuffer(res.content, dtype=np.uint8)
-        img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        segSize = (img_cv.shape[0], img_cv.shape[1])
-
-        img_data = pil_to_tensor(img_cv)
-        singleton_batch = {'img_data': img_data[None].cuda()}
-        with torch.no_grad():
-            scores = segmentation_module(singleton_batch, segSize=segSize)
-        _, pred = torch.max(scores, dim=1)
-        pred = pred.cpu()[0].numpy().astype('int8')
-        t2 = time.time()
-        print("Segmentation Processing = %s : %f" % (id, t2-t1))
-
-        cv2.imshow('seg', pred)
-        cv2.waitKey(1)
-        # processing end
-
 bufferSize = 1024
 def udpthread():
 
@@ -101,13 +67,8 @@ def udpthread():
         print(message)
 
         with ThreadPoolExecutor() as executor:
-            executor.submit(processingthread2, message)
-        """
-        ConditionVariable.acquire()
-        msgqueue.append(message)
-        ConditionVariable.notify()
-        ConditionVariable.release()
-        """
+            executor.submit(processingthread, message)
+
 if __name__ == "__main__":
 
     ##################################################
@@ -121,6 +82,9 @@ if __name__ == "__main__":
     parser.add_argument(
         '--SKeywords', type=str,
         help='Sendeded keyword lists')
+    parser.add_argument(
+        '--DataType', type=str,
+        help='Data type')
     parser.add_argument(
         '--ip', type=str,default='0.0.0.0',
         help='ip address')
@@ -203,7 +167,7 @@ if __name__ == "__main__":
     pil_to_tensor = torchvision.transforms.Compose([
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],  # These are RGB mean+std values
+            mean=[0.485, 0.456, 0.406],  #  These are RGB mean+std values
             std=[0.229, 0.224, 0.225])  # across a large photo dataset.
     ])
 
@@ -226,6 +190,8 @@ if __name__ == "__main__":
     FACADE_SERVER_ADDR = opt.FACADE_SERVER_ADDR
     ReceivedKeywords= opt.RKeywords.split(',')
     SendKeywords = opt.SKeywords
+    datatype = opt.DataType
+
     sess = requests.Session()
     sess.post(FACADE_SERVER_ADDR + "/Connect", ujson.dumps({
         #'port':opt.port,'key': keyword, 'prior':opt.prior, 'ratio':opt.ratio
