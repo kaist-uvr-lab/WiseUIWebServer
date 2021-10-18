@@ -77,91 +77,55 @@ bytesToSend = str.encode(msgFromServer)
 def work1():
     print("Start Message Processing Thread = %d"%(len(ConnectedAddrList)))
     while True:
-        bytesAddressPair = UDPServerSocket.recvfrom(bufferSize)
-        message = bytesAddressPair[0]
-        address = bytesAddressPair[1]
-        #print(address, message)
-        data = ujson.loads(message.decode())
-        method = data['type1']
-        keyword = data['keyword']
-        src = data['src']
-        if method == 'connect':
-            print(address)
-            if keyword not in KeywordAddrLists:
-                KeywordAddrLists[keyword] = {} #set()  # = {}
-                KeywordAddrLists[keyword]['all'] = set()
-            multi = data['type2']
-            if multi == 'single':
-                KeywordAddrLists[keyword][src] = address
-            else:
-                KeywordAddrLists[keyword]['all'].add(address)
-            #print('%s %s %s' % (method, keyword, multi))
-        elif method == 'disconnect':
-            multi = data['type2']
-            if multi == 'single':
-               KeywordAddrLists[keyword].pop(src)
-            else:
-                KeywordAddrLists[keyword]['all'].remove(address)
-        elif method == 'notification':
-            if keyword in KeywordAddrLists:
-                id = data['id']
-                #src = data['src']
-                type2 = data['type2']
-                if 'id2' in data:
-                    id2 = data['id2']
-                    json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id, 'id2':id2, 'src': src})
+        try:
+            bytesAddressPair = UDPServerSocket.recvfrom(bufferSize)
+            message = bytesAddressPair[0]
+            address = bytesAddressPair[1]
+            print(address, message)
+            data = ujson.loads(message.decode())
+            method = data['type1']
+            keyword = data['keyword']
+            src = data['src']
+            if method == 'connect':
+                if keyword not in KeywordAddrLists:
+                    KeywordAddrLists[keyword] = {}  # set()  # = {}
+                    KeywordAddrLists[keyword]['all'] = set()
+                multi = data['type2']
+                if multi == 'single':
+                    KeywordAddrLists[keyword][src] = address
                 else:
-                    json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id, 'src': src})
-                for addr in KeywordAddrLists[keyword]['all']:
-                    UDPServerSocket.sendto(json_data.encode(), addr)
-                addr = KeywordAddrLists[keyword].get(src)
-                if addr is not None:
-                    UDPServerSocket.sendto(json_data.encode(), addr)
-
-        #print(KeywordAddrLists)
-        #    KeywordAddrLists = {}
-
+                    KeywordAddrLists[keyword]['all'].add(address)
+                # print('%s %s %s' % (method, keyword, multi))
+            elif method == 'disconnect':
+                multi = data['type2']
+                if multi == 'single':
+                    KeywordAddrLists[keyword].pop(src)
+                else:
+                    KeywordAddrLists[keyword]['all'].remove(address)
+            elif method == 'notification':
+                if keyword in KeywordAddrLists:
+                    id = data['id']
+                    # src = data['src']
+                    type2 = data['type2']
+                    if 'id2' in data:
+                        id2 = data['id2']
+                        json_data = ujson.dumps(
+                            {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'id2': id2,
+                             'src': src})
+                    else:
+                        json_data = ujson.dumps(
+                            {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'src': src})
+                    for addr in KeywordAddrLists[keyword]['all']:
+                        UDPServerSocket.sendto(json_data.encode(), addr)
+                    addr = KeywordAddrLists[keyword].get(src)
+                    if addr is not None:
+                        UDPServerSocket.sendto(json_data.encode(), addr)
+        except ConnectionResetError:
+            print("connection error")
+        except UnicodeDecodeError:
+            print("unicode error")
         continue
-        if len(message)==4:
-            code, = struct.unpack('<f', message)
-            #code = float.from_bytes(message, byteorder='little', signed=True)
-            #print(code)
-            if code == 10000.0:
-                #ConnectedAddrList.append(address)
-                print("aaaa Connect %d"%(len(ConnectedAddrList)))
-            else:
-                #ConnectedAddrList.remove(address)
-                print("Disconnect %d" % (len(ConnectedAddrList)))
-        else:
-            print("%s=%s"%(address,message))
-            data = np.frombuffer(message, dtype = np.float32)
-            if data[0] == 1.0:
-                id = int(data[2])
-                if data[1] ==1.0:
-                    tempip = ".".join([str(int(data[4])), str(int(data[5])), str(int(data[6])), str(int(data[7]))])
-                    port = int(data[8])
-                    ConnectedAddrList[id] = (tempip, port)
-                    if data[3] == 1.0:
-                        ManagerAddr = (tempip, port)
-                    if ManagerAddr is not None:
-                        UDPServerSocket.sendto(message, ManagerAddr)
-                    print("Connect = %d"%(len(ConnectedAddrList)))
-                elif data[1] == 2.0:
-                    if ConnectedAddrList.get(id) is not None:
-                        del ConnectedAddrList[id]
-                        if ManagerAddr is not None:
-                            UDPServerSocket.sendto(message, ManagerAddr)
-                        print("Disonnect = %d" % (len(ConnectedAddrList)))
-                elif data[1] == 3.0:
-                    print("Send?? %s, %d"%(ConnectedAddrList[id][0], ConnectedAddrList[id][1]))
-                    UDPServerSocket.sendto(message, ConnectedAddrList[id])
-                    if ManagerAddr is not None and ConnectedAddrList[id] is not ManagerAddr:
-                        UDPServerSocket.sendto(message, ManagerAddr)
-            elif data[0] >= 2.0:
-                print("%d = %f %f %f"%(len(message), data[0], data[1], data[2]))
-                for addr in ConnectedAddrList.values():
-                    print("send to %s:%d"%(addr[0], addr[1]))
-                    UDPServerSocket.sendto(message, addr)
+
 
 if __name__ == "__main__":
 
