@@ -31,10 +31,76 @@ from socket import *
 from gevent.pywsgi import WSGIServer
 from gevent import monkey
 
+def SendNotification(keyword, id, src, type2, ts):
+    try:
+        if keyword in KeywordAddrLists:
+            json_data = ujson.dumps(
+                {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'src': src})
+
+            for addr in KeywordAddrLists[keyword]['all']:
+                UDPServerSocket.sendto(json_data.encode(), addr)
+            addr = KeywordAddrLists[keyword].get(src)
+            if addr is not None:
+                UDPServerSocket.sendto(json_data.encode(), addr)
+
+            #current_datetime = datetime.datetime.utcnow() - epoch
+            #ts2 = current_datetime.total_seconds()
+            #ts1 = Data["TS"][keyword][src][id]
+            print("Notification processing time %s = %f" % (keyword, time.time() - ts))
+    except KeyError:
+        a = 0
+    except ConnectionResetError:
+        a = 0
+    except UnicodeDecodeError:
+        a = 0
+
 ####UDP for notification
 def udpthread():
     while True:
-        print("asdf")
+        try:
+            bytesAddressPair = UDPServerSocket.recvfrom(udpbufferSize)
+            t1 = time.time()
+            current_datetime = datetime.datetime.utcnow() - epoch
+            rts = current_datetime.total_seconds()
+
+            message = bytesAddressPair[0]
+            address = bytesAddressPair[1]
+            # print(address, message)
+            data = ujson.loads(message.decode())
+            method = data['type1']
+            keyword = data['keyword']
+            src = data['src']
+            if not data.get('ts'):
+                sts = 0.0
+            else:
+                sts = data['ts']
+            if method == 'connect':
+                if keyword not in KeywordAddrLists:
+                    KeywordAddrLists[keyword] = {}  # set()  # = {}
+                    KeywordAddrLists[keyword]['all'] = set()
+                multi = data['type2']
+                if multi == 'single':
+                    KeywordAddrLists[keyword][src] = address
+                else:
+                    KeywordAddrLists[keyword]['all'].add(address)
+                # print('%s %s %s' % (method, keyword, multi))
+            elif method == 'disconnect':
+                multi = data['type2']
+                if multi == 'single':
+                    KeywordAddrLists[keyword].pop(src)
+                else:
+                    KeywordAddrLists[keyword]['all'].remove(address)
+        except KeyError:
+            a = 0
+            # print("Key Error")
+        except ConnectionResetError:
+            a = 0
+            # print("connection error")
+        except UnicodeDecodeError:
+            a = 0
+            # print("unicode error")
+        continue
+
 
 ####UDP for notification
 
@@ -96,14 +162,18 @@ def Store():
             span = Data["TS"][keyword][src][id1]-Data["TS"]["Image"][src][id1]
             print("image span = %s = %f = %f %f"%(keyword, span, Data["TS"][keyword][src][id1],Data["TS"]["Image"][src][id1]))
 
+        """
         if id2 == -1:
             json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id1, 'src': src, 'ts':ts}
         else:
             print("????????????????")
             json_str = {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id1, 'id2':id2, 'src': src}
         json_data = ujson.dumps(json_str)
+        """
 
-        udp_manage_soc.sendto(json_data.encode(), CONTENT_ECHO_SERVER_ADDR)
+        SendNotification(keyword, id1, src, type2, time.time())
+        #udp_manage_soc.sendto(json_data.encode(), CONTENT_ECHO_SERVER_ADDR)
+
         #print(data['data'])
     return 'a'#str(id1).encode()
 
@@ -116,6 +186,7 @@ def Load():
     if keyword in Keywords:
 
         if keyword == "MappingResult":
+
             current_datetime = datetime.datetime.utcnow() - epoch
             ts = current_datetime.total_seconds()
             span = ts-Data["TS"]["Image"][src][id1]
@@ -201,8 +272,10 @@ if __name__ == "__main__":
     MCAST_MANAGAE_PORT = 37000
 
     ##udp socket
-    CONTENT_ECHO_SERVER_ADDR = (opt.CONTENT_IP, opt.CONTENT_PORT)
-    udp_manage_soc = socket(AF_INET, SOCK_DGRAM)
+    udpbufferSize = 1024
+    KeywordAddrLists = {}
+    UDPServerSocket = socket(family=AF_INET, type=SOCK_DGRAM)
+    UDPServerSocket.bind((opt.ip, 35001))
 
     th1 = threading.Thread(target=udpthread)
     th1.start()
