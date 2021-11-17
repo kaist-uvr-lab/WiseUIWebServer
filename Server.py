@@ -34,19 +34,20 @@ from gevent import monkey
 def SendNotification(keyword, id, src, type2, ts):
     try:
         if keyword in KeywordAddrLists:
-            json_data = ujson.dumps(
-                {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'src': src})
+            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'src': src})
 
             for addr in KeywordAddrLists[keyword]['all']:
                 UDPServerSocket.sendto(json_data.encode(), addr)
             addr = KeywordAddrLists[keyword].get(src)
+            if keyword == "ObjectDetection":
+                print(len(addr))
             if addr is not None:
                 UDPServerSocket.sendto(json_data.encode(), addr)
 
             #current_datetime = datetime.datetime.utcnow() - epoch
             #ts2 = current_datetime.total_seconds()
             #ts1 = Data["TS"][keyword][src][id]
-            print("Notification processing time %s = %f" % (keyword, time.time() - ts))
+            print("Notification processing time %s %d = %f" % (keyword, id, time.time() - ts))
     except KeyError:
         a = 0
     except ConnectionResetError:
@@ -125,6 +126,7 @@ def Connect():
         if keyword not in Keywords:
             Keywords.add(keyword)
             Data[keyword] = {}
+            Data[keyword]["pair"] = type2
             Data["TS"][keyword]={}
             """
             if type2 == "raw":
@@ -135,64 +137,60 @@ def Connect():
     return 'a'
 
 epoch=datetime.datetime(1970,1,1,0,0,0,0)
+#current_datetime = datetime.datetime.utcnow() - epoch
+#ts = current_datetime.total_seconds()
 @app.route("/Store", methods=['POST'])
 def Store():
-
+    # ts
+    ts1 = time.time()
     keyword = request.args.get('keyword')
-    id1 = int(request.args.get('id'))
-    id2 = int(request.args.get('id2',-1))
+    id = int(request.args.get('id'))
     src = request.args.get('src')
     type2 = request.args.get('type2','None')
-
-    #ts
-    current_datetime = datetime.datetime.utcnow()-epoch
-    ts = current_datetime.total_seconds()
-    #current_timetuple = current_datetime.utctimetuple()
-    #current_timestamp = calendar.timegm(current_timetuple)
 
     if keyword in Keywords:
         if Data[keyword].get(src) is None:
             Data[keyword][src] = {}
             Data["TS"][keyword][src] = {}
 
-        Data[keyword][src][id1] = request.data
-        Data["TS"][keyword][src][id1] =ts
-
-        if keyword == "MappingResult" or keyword == "ObjectDetection" or keyword == "ReferenceFrame":
-            span = Data["TS"][keyword][src][id1]-Data["TS"]["Image"][src][id1]
-            print("image span = %s = %f = %f %f"%(keyword, span, Data["TS"][keyword][src][id1],Data["TS"]["Image"][src][id1]))
-
         """
-        if id2 == -1:
-            json_str = {'keyword': keyword, 'type1': 'notification', 'type2':type2, 'id': id1, 'src': src, 'ts':ts}
-        else:
-            print("????????????????")
-            json_str = {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id1, 'id2':id2, 'src': src}
-        json_data = ujson.dumps(json_str)
+        if Data[keyword]["pair"] != "NONE":
+            pair = Data[keyword]["pair"]
+            print(pair)
+            if Data[pair][src].get(id) is not None:
+                keyword = pair
         """
 
-        SendNotification(keyword, id1, src, type2, time.time())
-        #udp_manage_soc.sendto(json_data.encode(), CONTENT_ECHO_SERVER_ADDR)
+        ts2 = time.time()
+        Data[keyword][src][id] = bytes(request.data)
+        ts3 = time.time()
 
-        #print(data['data'])
+        Data["TS"][keyword][src][id] = ts1
+        SendNotification(keyword, id, src, type2, ts1)
+        ts4 = time.time()
+        print("Store processing time = %s, %d, %f %f"%(keyword, id, ts3-ts2, ts4-ts1))
+
+    """
+    if keyword == "MappingResult" or keyword == "ObjectDetection" or keyword == "Image":
+        span = Data["TS"][keyword][src][id] - Data["TS"]["Image"][src][id]
+        print("image span = %s = %f , %f %f = %d" % (keyword, span, ts3-ts2, ts4-ts1, len(request.data)))
+    """
     return 'a'#str(id1).encode()
 
 @app.route("/Load", methods=['POST'])
 def Load():
     keyword = request.args.get('keyword')
-    id1 = int(request.args.get('id'))
-    id2 = int(request.args.get('id2', -1))
+    id = int(request.args.get('id'))
     src = request.args.get('src')
     if keyword in Keywords:
-
+        """
         if keyword == "MappingResult":
-
             current_datetime = datetime.datetime.utcnow() - epoch
             ts = current_datetime.total_seconds()
-            span = ts-Data["TS"]["Image"][src][id1]
-            print("Load -store time span = %s = %f = %f %f"%(keyword, span, Data["TS"][keyword][src][id1],Data["TS"]["Image"][src][id1]))
-
-        return bytes(Data[keyword][src][id1])
+            span = ts-Data["TS"]["Image"][src][id]
+            print("Load -store time span = %s = %f = %f %f"%(keyword, span, Data["TS"][keyword][src][id],Data["TS"]["Image"][src][id]))
+        """
+        return bytes(Data[keyword][src][id])
     return ''
 ###########################################################################################################################
 
@@ -239,11 +237,9 @@ if __name__ == "__main__":
     """
     opt = parser.parse_args()
 
-
     """
     device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     # device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
-
 
     # matching=[]
     # for i in range(NUM_MAX_MATCH):
