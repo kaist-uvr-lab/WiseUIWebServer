@@ -14,14 +14,15 @@ import datetime
 import argparse
 import torch
 import os
-
+import keyboard
 
 ##import super glue and super point
 ##################################################
 import pickle
 import struct
-from module.User    import User
-from module.Map     import Map
+from module.ProcessingTime import ProcessingTime
+from module.User import User
+from module.Map import Map
 from module.Message import Message
 
 ##multicast
@@ -31,23 +32,45 @@ from socket import *
 from gevent.pywsgi import WSGIServer
 from gevent import monkey
 
+def printProcessingTime():
+    keys = Data["TS"].keys()
+    for key in keys:
+        t1 = Data["TS"][key]["IN"]
+        t1.update()
+        t2 = Data["TS"][key]["OUT"]
+        t2.update()
+        t3 = Data["TS"][key]["NOTIFICATION"]
+        t3.update()
+        print("%s ==IN== %s" % (key, t1.print()))
+        print("%s ==OUT== %s" % (key, t2.print()))
+        print("%s ==NOTI== %s" % (key, t3.print()))
+def saveProcessingTime():
+    keys = Data["TS"].keys()
+    for key in keys:
+        t1 = Data["TS"][key]["IN"]
+        t1.update()
+        t2 = Data["TS"][key]["OUT"]
+        t2.update()
+        t3 = Data["TS"][key]["NOTIFICATION"]
+        t3.update()
+    pickle.dump(Data["TS"], open('./evaluation/processing_time.bin', "wb"))
+
+keyboard.add_hotkey("ctrl+p",lambda: printProcessingTime())
+keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
+
 def SendNotification(keyword, id, src, type2, ts):
     try:
         if keyword in KeywordAddrLists:
+            ts1 = time.time()
             json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'src': src})
 
             for addr in KeywordAddrLists[keyword]['all']:
                 UDPServerSocket.sendto(json_data.encode(), addr)
             addr = KeywordAddrLists[keyword].get(src)
-            if keyword == "ObjectDetection":
-                print(len(addr))
             if addr is not None:
                 UDPServerSocket.sendto(json_data.encode(), addr)
-
-            #current_datetime = datetime.datetime.utcnow() - epoch
-            #ts2 = current_datetime.total_seconds()
-            #ts1 = Data["TS"][keyword][src][id]
-            print("Notification processing time %s %d = %f" % (keyword, id, time.time() - ts))
+            ts2 = time.time()
+            Data["TS"][keyword]["NOTIFICATION"].add(ts2-ts1,0)
     except KeyError:
         a = 0
     except ConnectionResetError:
@@ -61,8 +84,6 @@ def udpthread():
         try:
             bytesAddressPair = UDPServerSocket.recvfrom(udpbufferSize)
             t1 = time.time()
-            current_datetime = datetime.datetime.utcnow() - epoch
-            rts = current_datetime.total_seconds()
 
             message = bytesAddressPair[0]
             address = bytesAddressPair[1]
@@ -127,18 +148,19 @@ def Connect():
             Keywords.add(keyword)
             Data[keyword] = {}
             Data[keyword]["pair"] = type2
-            Data["TS"][keyword]={}
-            """
-            if type2 == "raw":
-                Data[keyword]['id'] = int(0)
-            else:
-                Data[keyword]['id'] = int(-1)
-            """
+        if Data["TS"].get(keyword) is None:
+            Data["TS"][keyword] = {}
+            Data["TS"][keyword]["IN"] = ProcessingTime()
+            Data["TS"][keyword]["OUT"] = ProcessingTime()
+            Data["TS"][keyword]["NOTIFICATION"] = ProcessingTime()
+        """
+        if type2 == "raw":
+            Data[keyword]['id'] = int(0)
+        else:
+            Data[keyword]['id'] = int(-1)
+        """
     return 'a'
 
-epoch=datetime.datetime(1970,1,1,0,0,0,0)
-#current_datetime = datetime.datetime.utcnow() - epoch
-#ts = current_datetime.total_seconds()
 @app.route("/Store", methods=['POST'])
 def Store():
     # ts
@@ -151,55 +173,38 @@ def Store():
     if keyword in Keywords:
         if Data[keyword].get(src) is None:
             Data[keyword][src] = {}
-            Data["TS"][keyword][src] = {}
 
-        """
-        if Data[keyword]["pair"] != "NONE":
-            pair = Data[keyword]["pair"]
-            print(pair)
-            if Data[pair][src].get(id) is not None:
-                keyword = pair
-        """
-
-        ts2 = time.time()
         Data[keyword][src][id] = bytes(request.data)
-        ts3 = time.time()
-
-        Data["TS"][keyword][src][id] = ts1
+        ts2 = time.time()
         SendNotification(keyword, id, src, type2, ts1)
-        ts4 = time.time()
-        print("Store processing time = %s, %d, %f %f"%(keyword, id, ts3-ts2, ts4-ts1))
-
-    """
-    if keyword == "MappingResult" or keyword == "ObjectDetection" or keyword == "Image":
-        span = Data["TS"][keyword][src][id] - Data["TS"]["Image"][src][id]
-        print("image span = %s = %f , %f %f = %d" % (keyword, span, ts3-ts2, ts4-ts1, len(request.data)))
-    """
+        Data["TS"][keyword]["IN"].add(ts2-ts1, len(Data[keyword][src][id]))
     return 'a'#str(id1).encode()
 
 @app.route("/Load", methods=['POST'])
 def Load():
+    ts1 = time.time()
     keyword = request.args.get('keyword')
     id = int(request.args.get('id'))
     src = request.args.get('src')
     if keyword in Keywords:
-        """
-        if keyword == "MappingResult":
-            current_datetime = datetime.datetime.utcnow() - epoch
-            ts = current_datetime.total_seconds()
-            span = ts-Data["TS"]["Image"][src][id]
-            print("Load -store time span = %s = %f = %f %f"%(keyword, span, Data["TS"][keyword][src][id],Data["TS"]["Image"][src][id]))
-        """
-        return bytes(Data[keyword][src][id])
+        ts2 = time.time()
+        Data["TS"][keyword]["OUT"].add(ts2 - ts1, len(Data[keyword][src][id]))
+        return (Data[keyword][src][id]) #bytes
     return ''
 ###########################################################################################################################
 
 ##################################################
 # END API part
 ##################################################
+import signal
+
+def handler(signum, frame):
+    a = 0
+
+
+signal.signal(signal.SIGINT, handler)
 
 if __name__ == "__main__":
-
     ##################################################
     ##arguments
     parser = argparse.ArgumentParser(
@@ -254,10 +259,18 @@ if __name__ == "__main__":
     bf = cv2.BFMatcher()  #
     """
 
-    #UserData = {}
-    #MapData = {}
-    Data={}
-    Data["TS"] = {}
+    # UserData = {}
+    # MapData = {}
+
+    Data = {}
+    try:
+        path = os.path.dirname(os.path.realpath(__file__))
+        f = open(path+'/evaluation/processing_time.bin', 'rb')
+        Data["TS"] = pickle.load(f)
+        f.close()
+    except FileNotFoundError:
+        Data["TS"] = {}
+
     Keywords = set()
     nKeywordID = 0
 
