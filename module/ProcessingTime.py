@@ -30,4 +30,4 @@ class ProcessingTime:
             self.avg_size = 0
 
     def print(self):
-        return "total = "+str(self.count)+", size = "+ str(self.avg_size)+", avg = "+str(self.avg)+", stddev ="+str(self.stddev)
+        return "total="+str(self.count)+",size="+str(self.avg_size)+",avg="+str(self.avg)+",stddev="+str(self.stddev)

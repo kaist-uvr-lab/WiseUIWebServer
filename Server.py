@@ -41,9 +41,9 @@ def printProcessingTime():
         t2.update()
         t3 = Data["TS"][key]["NOTIFICATION"]
         t3.update()
-        print("%s ==IN== %s" % (key, t1.print()))
-        print("%s ==OUT== %s" % (key, t2.print()))
-        print("%s ==NOTI== %s" % (key, t3.print()))
+        print("%s==IN==%s" % (key, t1.print()))
+        print("%s==OUT==%s" % (key, t2.print()))
+        print("%s==NOTI==%s" % (key, t3.print()))
 def saveProcessingTime():
     keys = Data["TS"].keys()
     for key in keys:
@@ -70,7 +70,7 @@ def SendNotification(keyword, id, src, type2, ts):
             if addr is not None:
                 UDPServerSocket.sendto(json_data.encode(), addr)
             ts2 = time.time()
-            Data["TS"][keyword]["NOTIFICATION"].add(ts2-ts1,0)
+            Data["TS"][keyword]["NOTIFICATION"].add(ts2-ts1,len(json_data))
     except KeyError:
         a = 0
     except ConnectionResetError:
@@ -87,7 +87,7 @@ def udpthread():
 
             message = bytesAddressPair[0]
             address = bytesAddressPair[1]
-            # print(address, message)
+
             data = ujson.loads(message.decode())
             method = data['type1']
             keyword = data['keyword']
@@ -143,7 +143,7 @@ def Connect():
     type2 = data['type2']
 
     for keyword in Tempkeywords:
-        print("%s %s %s"%(keyword, method, type2))
+        #print("%s %s %s"%(keyword, method, type2))
         if keyword not in Keywords:
             Keywords.add(keyword)
             Data[keyword] = {}
