@@ -92,7 +92,7 @@ def sample_descriptors(keypoints, descriptors, s: int = 8):
     return descriptors
 
 
-class SuperPoint(nn.Module):
+class SuperPoint2(nn.Module):
     """SuperPoint Convolutional Detector and Descriptor
 
     SuperPoint: Self-Supervised Interest Point Detection and
@@ -128,6 +128,7 @@ class SuperPoint(nn.Module):
         self.convPa = nn.Conv2d(c4, c5, kernel_size=3, stride=1, padding=1)
         self.convPb = nn.Conv2d(c5, 65, kernel_size=1, stride=1, padding=0)
 
+
         self.convDa = nn.Conv2d(c4, c5, kernel_size=3, stride=1, padding=1)
         self.convDb = nn.Conv2d(
             c5, self.config['descriptor_dim'],
@@ -140,7 +141,7 @@ class SuperPoint(nn.Module):
         if mk == 0 or mk < -1:
             raise ValueError('\"max_keypoints\" must be positive or \"-1\"')
 
-        print('Loaded SuperPoint model')
+        print('Loaded SuperPoint2 model')
 
     def forward(self, data):
         """ Compute keypoints, scores, descriptors for image """
@@ -156,7 +157,6 @@ class SuperPoint(nn.Module):
         x = self.pool(x)
         x = self.relu(self.conv4a(x))
         x = self.relu(self.conv4b(x))
-
         # Compute the dense keypoint scores
         cPa = self.relu(self.convPa(x))
         scores = self.convPb(cPa)
@@ -166,29 +166,27 @@ class SuperPoint(nn.Module):
         scores = scores.permute(0, 1, 3, 2, 4).reshape(b, h*8, w*8)
         scores = simple_nms(scores, self.config['nms_radius'])
 
-        if 'keypoints' not in data:
-            # Extract keypoints
-            keypoints = [
-                torch.nonzero(s > self.config['keypoint_threshold'])
-                for s in scores]
-            scores = [s[tuple(k.t())] for s, k in zip(scores, keypoints)]
+        # Extract keypoints
+        keypoints = [
+            torch.nonzero(s > self.config['keypoint_threshold'])
+            for s in scores]
+        scores = [s[tuple(k.t())] for s, k in zip(scores, keypoints)]
 
-            # Discard keypoints near the image borders
+        # Discard keypoints near the image borders
+        keypoints, scores = list(zip(*[
+            remove_borders(k, s, self.config['remove_borders'], h * 8, w * 8)
+            for k, s in zip(keypoints, scores)]))
+
+        # Keep the k keypoints with highest score
+        if self.config['max_keypoints'] >= 0:
             keypoints, scores = list(zip(*[
-                remove_borders(k, s, self.config['remove_borders'], h*8, w*8)
+                top_k_keypoints(k, s, self.config['max_keypoints'])
                 for k, s in zip(keypoints, scores)]))
 
-            # Keep the k keypoints with highest score
-            if self.config['max_keypoints'] >= 0:
-                keypoints, scores = list(zip(*[
-                    top_k_keypoints(k, s, self.config['max_keypoints'])
-                    for k, s in zip(keypoints, scores)]))
+        # Convert (h, w) to (x, y)
+        keypoints = [torch.flip(k, [1]).float() for k in keypoints]
 
-            # Convert (h, w) to (x, y)
-            keypoints = [torch.flip(k, [1]).float() for k in keypoints]
-        else:
-            keypoints = data['keypoints']
-
+        """
         # Compute the dense descriptors
         cDa = self.relu(self.convDa(x))
         descriptors = self.convDb(cDa)
@@ -197,9 +195,10 @@ class SuperPoint(nn.Module):
         # Extract descriptors
         descriptors = [sample_descriptors(k[None], d[None], 8)[0]
                        for k, d in zip(keypoints, descriptors)]
+        """
 
         return {
             'keypoints': keypoints,
-            'scores': scores,
-            'descriptors': descriptors,
+            #'scores': scores,
+            #'descriptors': descriptors,
         }

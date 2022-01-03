@@ -1,0 +1,1 @@
+python Server.py --RKeywords=Image --SKeywords=FeatureDetection --FACADE_SERVER_ADDR=http://143.248.6.143:35005 --ECHO_SERVER_IP=143.248.6.143 --ECHO_SERVER_PORT=35001 --port=35006 --prior=1 --ratio=1

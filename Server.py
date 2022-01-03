@@ -13,15 +13,33 @@ import torch
 from superglue.SuperPointFeature2D import SuperPointFeature2D
 from superglue.matching import Matching
 from superglue.utils import (frame2tensor, keyframe2tensor)
+from superglue.superpoint2 import SuperPoint2
 
 #WSGI
 from gevent.pywsgi import WSGIServer
+
+#Thread Pool
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+#from multiprocessing import Pool
 
 ##################################################
 # API part
 ##################################################
 
-app = Flask(__name__)
+from module.ProcessingTime import ProcessingTime
+import pickle
+import keyboard
+
+def printProcessingTime():
+    Data["Time"].update()
+    print(Data["Time"].print())
+def saveProcessingTime():
+    Data["Time"].update()
+    pickle.dump(Data["Time"], open('./evaluation/processing_time.bin', "wb"))
+#keyboard.add_hotkey("ctrl+p",lambda: printProcessingTime())
+#keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
+
+#app = Flask(__name__)
 #cors = CORS(app)
 #CORS(app, resources={r'*': {'origins': ['143.248.96.81', 'http://localhost:35005']}})
 
@@ -37,6 +55,93 @@ def matchingthread():
         res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=" + keyword + "&id=" + str(id1), "")
         id2 = int(res.content)
         print("%s %d %d"%(keyword, id1, id2))
+"""
+list_quality = [100,90,80,70,60,50,40,30,20,10,1]
+desc_dst = {}
+for q in list_quality:
+    desc_dst[q] = []
+"""
+def predict(frame_tensor):
+    with torch.no_grad():
+        last_data = module({'image': frame_tensor})
+        ori_kp = last_data['keypoints'][0].cpu().detach().numpy()
+        return ori_kp
+
+def processingthread2(data):
+    t1 = time.time()
+    id = data['id']
+    strid = str(id)
+    keyword = data['keyword']
+    src = data['src']
+    type2 = data['type2']
+
+    Data[keyword][id] = True
+    if Data['ReqSuperPoint'][id] and Data['Image'][id]:
+
+        res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=" + "Image" + "&id=" + str(id)+"&src="+src, "")
+        img_array = np.frombuffer(res.content, dtype=np.uint8)
+        img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
+
+        ori_data = []
+
+        frame_tensor = frame2tensor(gray, device)
+        with torch.no_grad():
+            """
+            ta1 = time.time()
+            last_data = matching.superpoint({'image': frame_tensor})
+            tb1 = time.time()
+            last_data['image'] = frame_tensor
+            ori_kp = last_data['keypoints'][0].cpu().detach().numpy()
+            ori_desc = last_data['descriptors'][0].cpu().detach().numpy().transpose()
+            #ori_data = list(zip(ori_kp, ori_desc))
+            #ori_data = sorted(ori_data, key = lambda x: (x[0][0], x[0][1]))
+            """
+            #ta2 = time.time()
+            #last_data = SuperPoint({'image': frame_tensor})
+            #ori_kp = last_data['keypoints'][0].cpu().detach().numpy()
+            #tb2 = time.time()
+            #print("TEST = ", tb1-ta1, tb2-ta2)
+            #res = module_pool.apply_async(predict, frame_tensor)
+            kpts = predict(frame_tensor)
+            #print(res.get(timeput=1))
+            sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Keypoints&id=" + strid + "&src=" + src, kpts.tobytes())
+
+        t2 = time.time()
+        print("processing time", t2-t1)
+
+    #Data["Time"].add(t2-t1, len(ori_kp))
+
+    """
+    print("IMAGE ", id)
+    for q in list_quality:
+        encoded_param = [int(cv2.IMWRITE_JPEG_QUALITY),q]
+        res, buffer = cv2.imencode('.jpg', img_cv, encoded_param)
+        decoded_img = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(decoded_img, cv2.COLOR_RGB2GRAY)
+
+        ##super point
+        frame_tensor = frame2tensor(img, device)
+        with torch.no_grad():
+            #jpeg_data = matching.superpoint({'image': frame_tensor})
+            jpeg_data = matching.superpoint({'image': frame_tensor, 'keypoints':last_data['keypoints']})
+            #jpeg_data['image'] = jpeg_tensor
+            t1 = jpeg_data['keypoints'][0].cpu().detach().numpy()
+            t2 = jpeg_data['descriptors'][0].cpu().detach().numpy().transpose()
+
+            #jpeg_data = list(zip(t1,t2))
+            #jpeg_data = sorted(jpeg_data, key=lambda x: (x[0][0], x[0][1]))
+            #for idx in range(len(t1)):
+                #print(idx, ori_kp[idx],t1[idx])
+
+            for idx in range(len(t2)):
+                desc_dst[q].append(cv2.norm(ori_desc[idx], t2[idx], cv2.NORM_L2))
+
+        print(q, np.mean(desc_dst[q]))
+            #kpts.append(t1)
+            #kpts.append(t2)
+    """
+
 
 def processingthread(Data):
 
@@ -79,6 +184,7 @@ def processingthread(Data):
 
 
             elif keyword == 'Image':
+                print("Superpoint")
                 res = sess.post(FACADE_SERVER_ADDR + "/Load?keyword=" + keyword + "&id=" + str(id), "")
                 img_array = np.frombuffer(res.content, dtype=np.uint8)
                 img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
@@ -95,7 +201,7 @@ def processingthread(Data):
                 a2 = time.time()
                 print("Superpoint = %f"%(a2-a1))
 
-                """
+
                 ##super point
                 frame_tensor = frame2tensor(img, device)
                 with torch.no_grad():
@@ -109,7 +215,7 @@ def processingthread(Data):
                 sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Keypoints&id=" + strid + "&src=" + src, kpts.tobytes())
                 sess.post(FACADE_SERVER_ADDR + "/Store?keyword=Descriptors&id=" + strid + "&src=" + src,desc.transpose().tobytes())
                 ##super point
-                """
+
 
         #print("queue %d"%(len(msgqueue1)))
         continue
@@ -341,19 +447,23 @@ def processingthread(Data):
         print("Super Point Processing = %s = %d : %f %f" % (id, len(msgqueue1), end - start, topt_e-topt_s))
         # processing end
 
-bufferSize = 1024
-def udpthread():
 
+def udpthread():
+    bufferSize = 1024
     while True:
         bytesAddressPair = ECHO_SOCKET.recvfrom(bufferSize)
         message = bytesAddressPair[0]
         data = ujson.loads(message.decode())
 
+        with ThreadPoolExecutor() as executor:
+            executor.submit(processingthread2, data)
+
+        """
         ConditionVariable.acquire()
         msgqueue1.append(data)
         ConditionVariable.notify()
         ConditionVariable.release()
-
+        """
         """
         if data['keyword'] == 'Image':
             msgqueue1.append(data)
@@ -364,8 +474,11 @@ def udpthread():
         #ConditionVariable.notify()
         #ConditionVariable.release()
 
-if __name__ == "__main__":
 
+import torch.multiprocessing as mp
+
+if __name__ == "__main__":
+    mp.freeze_support()
     ##################################################
     ##basic arguments
     parser = argparse.ArgumentParser(
@@ -473,6 +586,7 @@ if __name__ == "__main__":
     else:
         raise ValueError('Cannot specify more than two integers for --resize')
 
+
     config = {
         'superpoint': {
             'nms_radius': opt.nms_radius,
@@ -485,16 +599,32 @@ if __name__ == "__main__":
             'match_threshold': opt.match_threshold,
         }
     }
-    #matching = Matching(config).eval().to(device)
-    SuperPointKeywords = ['keypoints', 'scores', 'descriptors','image']
-    detector = SuperPointFeature2D(True)
 
+    """
+    modules = []
+    for i in range(1,9):
+        matching = Matching(config).eval().to(device)
+        modules.append(matching)
+    print(len(modules))
+    """
+
+    mp.set_start_method('spawn')
+    module = SuperPoint2(config.get('superpoint', {})).eval().to(device)
+    #module.share_memory()
+    #module_pool = mp.Pool(processes=1)
+
+    SuperPointKeywords = ['keypoints', 'scores', 'descriptors','image']
+    #detector = SuperPointFeature2D(True)
     ##test
     print("init start")
+
     rgb = np.random.randint(255, size=(640, 480), dtype=np.uint8)
     test_tesnsor = frame2tensor(rgb, device)
     #detector.compute(rgb)
+    #for module in modules:
+    module({'image': test_tesnsor})
     #matching.superpoint({'image': test_tesnsor})
+
     print("init end")
 
     ##LOAD SuperGlue & SuperPoint
@@ -532,6 +662,14 @@ if __name__ == "__main__":
     ##Opticalflow
 
     Data = {}
+    try:
+        path = os.path.dirname(os.path.realpath(__file__))
+        f = open(path + '/evaluation/processing_time.bin', 'rb')
+        Data["Time"] = pickle.load(f)
+        f.close()
+    except FileNotFoundError:
+        Data["Time"] = ProcessingTime()
+
     msgqueue1 = []
     msgqueue2 = []
 
@@ -557,15 +695,15 @@ if __name__ == "__main__":
     ConditionVariable = threading.Condition()
 
     th1 = threading.Thread(target=udpthread)
-    th2 = threading.Thread(target=processingthread, args=(Data,))
+    #th2 = threading.Thread(target=processingthread, args=(Data,))
     #th3 = threading.Thread(target=matchingthread)
     th1.start()
-    th2.start()
+    #th2.start()
     #th3.start()
     # thread
 
-    http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
-    http.serve_forever()
+    #http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
+    #http.serve_forever()
 
 
 
