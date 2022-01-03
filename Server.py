@@ -187,6 +187,8 @@ def Load():
     id = int(request.args.get('id'))
     src = request.args.get('src')
     if keyword in Keywords:
+        #while Data[keyword][src].get(id) is None:
+        #    print("empty key!!")
         ts2 = time.time()
         Data["TS"][keyword]["OUT"].add(ts2 - ts1, len(Data[keyword][src][id]))
         return (Data[keyword][src][id]) #bytes
@@ -292,6 +294,8 @@ if __name__ == "__main__":
     print('Starting the API')
     # app.run(host=opt.ip, port=opt.port)
     # app.run(host=opt.ip, port = opt.port, threaded = True)
+
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
+
     http.serve_forever()
 
