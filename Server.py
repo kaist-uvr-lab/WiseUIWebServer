@@ -29,6 +29,8 @@ from module.Message import Message
 from socket import *
 
 ####WSGI
+from multiprocessing.pool import Pool
+import gevent
 from gevent.pywsgi import WSGIServer
 from gevent import monkey
 
@@ -92,10 +94,12 @@ def udpthread():
             method = data['type1']
             keyword = data['keyword']
             src = data['src']
+
             if not data.get('ts'):
                 sts = 0.0
             else:
                 sts = data['ts']
+
             if method == 'connect':
                 if keyword not in KeywordAddrLists:
                     KeywordAddrLists[keyword] = {}  # set()  # = {}
@@ -141,7 +145,7 @@ def Connect():
     Tempkeywords = data['keyword'].split(',')
     method = data['type1'] #server, device
     type2 = data['type2']
-
+    print("///")
     for keyword in Tempkeywords:
         #print("%s %s %s"%(keyword, method, type2))
         if keyword not in Keywords:
@@ -202,7 +206,6 @@ import signal
 
 def handler(signum, frame):
     a = 0
-
 
 signal.signal(signal.SIGINT, handler)
 
@@ -295,7 +298,7 @@ if __name__ == "__main__":
     # app.run(host=opt.ip, port=opt.port)
     # app.run(host=opt.ip, port = opt.port, threaded = True)
 
-    http = WSGIServer((opt.ip, opt.port), app.wsgi_app)
+    http = WSGIServer((opt.ip, opt.port), app.wsgi_app, environ={'wsgi.multithread':False, 'wsgi.multiprocess':True})
 
-    http.serve_forever()
+    # gevent.spawn(http.serve_forever())
 
