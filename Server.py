@@ -62,7 +62,7 @@ def SendNotification(keyword, id, src, type2, ts):
     try:
         if keyword in KeywordAddrLists:
             ts1 = time.time()
-            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'src': src})
+            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts':ts, 'src': src})
 
             for addr in KeywordAddrLists[keyword]['all']:
                 UDPServerSocket.sendto(json_data.encode(), addr)
@@ -168,15 +168,15 @@ def Store():
     keyword = request.args.get('keyword')
     id = int(request.args.get('id'))
     src = request.args.get('src')
+    ts = request.args.get('ts', '0.0')
     type2 = request.args.get('type2','None')
 
     if keyword in Keywords:
         if Data[keyword].get(src) is None:
             Data[keyword][src] = {}
-
         Data[keyword][src][id] = bytes(request.data)
         ts2 = time.time()
-        SendNotification(keyword, id, src, type2, ts1)
+        SendNotification(keyword, id, src, type2, ts)
         Data["TS"][keyword]["IN"].add(ts2-ts1, len(Data[keyword][src][id]))
     return 'a'#str(id1).encode()
 
