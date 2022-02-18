@@ -21,6 +21,8 @@ import keyboard
 import pickle
 import struct
 from module.ProcessingTime import ProcessingTime
+from module.Device import Device
+from module.Scheduler import Scheduler
 from module.User import User
 from module.Map import Map
 from module.Message import Message
@@ -65,9 +67,14 @@ def SendNotification(keyword, id, src, type2, ts):
         if keyword in KeywordAddrLists:
             ts1 = time.time()
             json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts':ts, 'src': src})
-
             for addr in KeywordAddrLists[keyword]['all']:
                 UDPServerSocket.sendto(json_data.encode(), addr)
+
+            ###Check Scheduling:
+            #SchedulerData[keyword]
+            #DeviceData[src]
+            #if
+
             addr = KeywordAddrLists[keyword].get(src)
             if addr is not None:
                 UDPServerSocket.sendto(json_data.encode(), addr)
@@ -104,29 +111,38 @@ def udpthread():
                 if keyword not in KeywordAddrLists:
                     KeywordAddrLists[keyword] = {}  # set()  # = {}
                     KeywordAddrLists[keyword]['all'] = set()
+                if keyword not in SchedulerData:
+                    SchedulerData[keyword]=Scheduler(keyword)
                 multi = data['type2']
                 if multi == 'single':
                     KeywordAddrLists[keyword][src] = address
                 else:
                     KeywordAddrLists[keyword]['all'].add(address)
                 # print('%s %s %s' % (method, keyword, multi))
+                if src not in DeviceData:
+                    print("????????????????????????????")
+                    DeviceData[src] = Device(src)
+                DeviceData[src].receive_keyword.add(keyword)
+                SchedulerData[keyword].add_receive_list(DeviceData[src])
             elif method == 'disconnect':
                 multi = data['type2']
                 if multi == 'single':
                     KeywordAddrLists[keyword].pop(src)
                 else:
                     KeywordAddrLists[keyword]['all'].remove(address)
+                if src in DeviceData and keyword in SchedulerData:
+                    SchedulerData[keyword].remove_receive_list(DeviceData[src])
+            #print("S2 = ", keyword, len(SchedulerData[keyword].send_list), len(SchedulerData[keyword].receive_list))
         except KeyError:
-            a = 0
             # print("Key Error")
+            pass
         except ConnectionResetError:
-            a = 0
             # print("connection error")
+            pass
         except UnicodeDecodeError:
-            a = 0
             # print("unicode error")
+            pass
         continue
-
 
 ####UDP for notification
 
@@ -134,35 +150,85 @@ def udpthread():
 # API part
 ##################################################
 app = Flask(__name__)
+
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
+    src = request.args.get('src')
+    type = request.args.get('type')
+    if src in DeviceData:
+        for key in list(DeviceData[src].send_keyword):
+            if key in SchedulerData:
+                SchedulerData[key].remove_send_list(DeviceData[src])
+        #print(DeviceData[src].send_keyword)
 
+    #if type == 'device' and src in Data['device']:
+    #    Data['device_capacity'] = Data['device_capacity'] - Data['device'][src]['capacity']
     return ''
+
 @app.route("/Connect", methods=['POST'])
 def Connect():
 
     data = ujson.loads(request.data)
     Tempkeywords = data['keyword'].split(',')
-    method = data['type1'] #server, device
+    type1 = data['type1'] #server, device
     type2 = data['type2']
-    print("///")
+    src = data['src']
+
+    if src not in DeviceData:
+        DeviceData[src] = Device(src)
+    try:
+        capacity = data['capacity']
+    except:
+        capacity = 0
+    #finally:
+    #    print('id = ', src, ', capacity= ', capacity, ', type = ', type1)
+    DeviceData[src].capacity = capacity
+    DeviceData[src].type = type1
+
+    ####Update Sending Keyword
     for keyword in Tempkeywords:
-        #print("%s %s %s"%(keyword, method, type2))
+        DeviceData[src].send_keyword.add(keyword)
+        DeviceData[src].Skipping[keyword] = 0
+        DeviceData[src].Sending[keyword] = 0
+
         if keyword not in Keywords:
             Keywords.add(keyword)
             Data[keyword] = {}
             Data[keyword]["pair"] = type2
+        if keyword not in SchedulerData:
+            SchedulerData[keyword] = Scheduler(keyword)
+        SchedulerData[keyword].add_send_list(DeviceData[src])
+
         if Data["TS"].get(keyword) is None:
             Data["TS"][keyword] = {}
             Data["TS"][keyword]["IN"] = ProcessingTime()
             Data["TS"][keyword]["OUT"] = ProcessingTime()
             Data["TS"][keyword]["NOTIFICATION"] = ProcessingTime()
-        """
-        if type2 == "raw":
-            Data[keyword]['id'] = int(0)
+
+        #print("S1 = ", keyword, len(SchedulerData[keyword].send_list), len(SchedulerData[keyword].receive_list))
+    ####Update Sending Keyword
+
+    ####Update Capacity
+    """
+    temp = {}
+    temp['capacity'] = capacity
+    if type1 == 'server':
+        if capacity > 0 and Data['device_capacity'] >= capacity:
+            temp['schedule'] = True
         else:
-            Data[keyword]['id'] = int(-1)
-        """
+            temp['schedule'] = False
+        for device in Data['device'].keys():
+            print(device)
+    if type1 == 'device':
+        temp['queue'] = {}
+        Data['device_capacity'] = Data['device_capacity'] + capacity
+        for server in Data['server'].keys():
+            print(server)
+    Data[type1][src] = temp
+    print("Device = ", len(Data['device']), ",Server = ", len(Data['server']))
+    """
+    ### update server capacity
+
     return 'a'
 
 @app.route("/Store", methods=['POST'])
@@ -267,6 +333,8 @@ if __name__ == "__main__":
     # UserData = {}
     # MapData = {}
 
+    DeviceData={}
+    SchedulerData={}
     Data = {}
     try:
         path = os.path.dirname(os.path.realpath(__file__))
@@ -275,6 +343,10 @@ if __name__ == "__main__":
         f.close()
     except FileNotFoundError:
         Data["TS"] = {}
+    #SERVER, DEVICE CAPACITY for scheduler
+    #Data['server']={}
+    #Data['device']={}
+    #Data['device_capacity'] = 0
 
     Keywords = set()
     nKeywordID = 0
@@ -299,6 +371,6 @@ if __name__ == "__main__":
     # app.run(host=opt.ip, port = opt.port, threaded = True)
 
     http = WSGIServer((opt.ip, opt.port), app.wsgi_app, environ={'wsgi.multithread':False, 'wsgi.multiprocess':True})
-
+    http.serve_forever()
     # gevent.spawn(http.serve_forever())
 
