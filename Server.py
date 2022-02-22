@@ -64,28 +64,34 @@ keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
 
 def SendNotification(keyword, id, src, type2, ts):
     try:
-        if keyword in KeywordAddrLists:
+        if keyword in SchedulerData:
             ts1 = time.time()
-            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts':ts, 'src': src})
-            for addr in KeywordAddrLists[keyword]['all']:
-                UDPServerSocket.sendto(json_data.encode(), addr)
+            json_data = ujson.dumps(
+                {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'src': src})
+            for key in SchedulerData[keyword].broadcast_list.keys():
+                bSend = True
+                desc = SchedulerData[keyword].broadcast_list[key]
+                if desc.bSchedule:
+                    DeviceData[src].Sending[keyword] += 1
+                    if DeviceData[src].Sending[keyword] % DeviceData[src].Skipping[desc.name] != 0:
+                        bSend = False
+                    print("Scheduling = ", src, key, DeviceData[src].Sending[keyword],
+                              DeviceData[src].Skipping[desc.name], bSend)
+                if bSend:
+                    UDPServerSocket.sendto(json_data.encode(), desc.addr)
 
-            ###Check Scheduling:
-            #SchedulerData[keyword]
-            #DeviceData[src]
-            #if
-
-            addr = KeywordAddrLists[keyword].get(src)
-            if addr is not None:
-                UDPServerSocket.sendto(json_data.encode(), addr)
+            if src in SchedulerData[keyword].unicast_list.keys():
+                UDPServerSocket.sendto(json_data.encode(), SchedulerData[keyword].unicast_list[src].addr)
             ts2 = time.time()
-            Data["TS"][keyword]["NOTIFICATION"].add(ts2-ts1,len(json_data))
+            Data["TS"][keyword]["NOTIFICATION"].add(ts2 - ts1, len(json_data))
     except KeyError:
-        a = 0
+        pass
     except ConnectionResetError:
-        a = 0
+        pass
     except UnicodeDecodeError:
-        a = 0
+        pass
+    except Exception as e:
+        print(e)
 
 ####UDP for notification
 def udpthread():
@@ -108,30 +114,36 @@ def udpthread():
                 sts = data['ts']
 
             if method == 'connect':
-                if keyword not in KeywordAddrLists:
-                    KeywordAddrLists[keyword] = {}  # set()  # = {}
-                    KeywordAddrLists[keyword]['all'] = set()
-                if keyword not in SchedulerData:
-                    SchedulerData[keyword]=Scheduler(keyword)
-                multi = data['type2']
-                if multi == 'single':
-                    KeywordAddrLists[keyword][src] = address
-                else:
-                    KeywordAddrLists[keyword]['all'].add(address)
-                # print('%s %s %s' % (method, keyword, multi))
                 if src not in DeviceData:
                     print("????????????????????????????")
                     DeviceData[src] = Device(src)
+                DeviceData[src].addr = address
                 DeviceData[src].receive_keyword.add(keyword)
-                SchedulerData[keyword].add_receive_list(DeviceData[src])
+                if keyword not in SchedulerData:
+                    SchedulerData[keyword]=Scheduler(keyword)
+
+                multi = data['type2']
+                SchedulerData[keyword].add_receive_list(DeviceData[src], multi)
+                """
+                if multi == 'single':
+                    SchedulerData[keyword].unicast_list[src] = address
+                    KeywordAddrLists[keyword][src] = address
+                else:
+                    KeywordAddrLists[keyword]['all'].add(address)
+                """
+                # print('%s %s %s' % (method, keyword, multi))
+
             elif method == 'disconnect':
                 multi = data['type2']
+                SchedulerData[keyword].remove_receive_list(DeviceData[src], multi)
+                """
                 if multi == 'single':
                     KeywordAddrLists[keyword].pop(src)
                 else:
                     KeywordAddrLists[keyword]['all'].remove(address)
                 if src in DeviceData and keyword in SchedulerData:
                     SchedulerData[keyword].remove_receive_list(DeviceData[src])
+                """
             #print("S2 = ", keyword, len(SchedulerData[keyword].send_list), len(SchedulerData[keyword].receive_list))
         except KeyError:
             # print("Key Error")
@@ -142,7 +154,8 @@ def udpthread():
         except UnicodeDecodeError:
             # print("unicode error")
             pass
-        continue
+        except Exception as e:
+            print(e)
 
 ####UDP for notification
 
@@ -188,7 +201,6 @@ def Connect():
     ####Update Sending Keyword
     for keyword in Tempkeywords:
         DeviceData[src].send_keyword.add(keyword)
-        DeviceData[src].Skipping[keyword] = 0
         DeviceData[src].Sending[keyword] = 0
 
         if keyword not in Keywords:
@@ -256,6 +268,7 @@ def Load():
     keyword = request.args.get('keyword')
     id = int(request.args.get('id'))
     src = request.args.get('src')
+
     if keyword in Keywords:
         #while Data[keyword][src].get(id) is None:
         #    print("empty key!!")
@@ -359,7 +372,6 @@ if __name__ == "__main__":
 
     ##udp socket
     udpbufferSize = 1024
-    KeywordAddrLists = {}
     UDPServerSocket = socket(family=AF_INET, type=SOCK_DGRAM)
     UDPServerSocket.bind((opt.ip, 35001))
 

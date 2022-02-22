@@ -8,10 +8,12 @@ class Device:
         self.Skipping = {}
         self.Sending = {}
         self.type = 'device'
+        self.addr = None
 
     def SetScheduling(self, keyword, Total):
         if self.type == 'device':
             return 0
+
         nSkip = int(Total / self.capacity) + 1
         if nSkip == 1:
             self.bSchedule = False
