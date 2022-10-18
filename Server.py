@@ -15,6 +15,7 @@ import argparse
 import torch
 import os
 import keyboard
+import ntplib
 
 ##import super glue and super point
 ##################################################
@@ -23,6 +24,7 @@ import struct
 from module.ProcessingTime import ProcessingTime
 from module.Device import Device
 from module.Scheduler import Scheduler
+from module.Keyword import Keyword as KeywordData
 from module.User import User
 from module.Map import Map
 from module.Message import Message
@@ -57,7 +59,7 @@ def saveProcessingTime():
         t2.update()
         t3 = Data["TS"][key]["NOTIFICATION"]
         t3.update()
-    pickle.dump(Data["TS"], open('./evaluation/processing_time.bin', "wb"))
+    pickle.dump(Data["TS"], open(path+'/evaluation/processing_time.bin', "wb"))
 
 keyboard.add_hotkey("ctrl+p",lambda: printProcessingTime())
 keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
@@ -66,21 +68,36 @@ def SendNotification(keyword, id, src, type2, ts):
     try:
         if keyword in SchedulerData:
             ts1 = time.time()
-            json_data = ujson.dumps(
-                {'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'src': src})
+            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'src': src})
             for key in SchedulerData[keyword].broadcast_list.keys():
+
                 bSend = True
                 desc = SchedulerData[keyword].broadcast_list[key]
+
+                if keyword == "ResTask1":
+                    print('123123123', bSend, desc.bSchedule, src, keyword, key, desc.name)
+                    print(DeviceData[src].Sending)
+                    print(DeviceData[src].Skipping)
+
                 if desc.bSchedule:
+                    print('error case???')
+                    print('skiping',DeviceData[src].Skipping[desc.name])
+                    print('sending',DeviceData[src].Sending[keyword])
                     DeviceData[src].Sending[keyword] += 1
                     if DeviceData[src].Sending[keyword] % DeviceData[src].Skipping[desc.name] != 0:
                         bSend = False
+                    if keyword == "ResTask1":
+                        print('sc????')
                     print("Scheduling = ", src, key, DeviceData[src].Sending[keyword],
                               DeviceData[src].Skipping[desc.name], bSend)
                 if bSend:
+                    if keyword == "ResTask1":
+                        print('send success')
                     UDPServerSocket.sendto(json_data.encode(), desc.addr)
 
             if src in SchedulerData[keyword].unicast_list.keys():
+                if keyword == "ResTask1":
+                    print('sending success')
                 UDPServerSocket.sendto(json_data.encode(), SchedulerData[keyword].unicast_list[src].addr)
             ts2 = time.time()
             Data["TS"][keyword]["NOTIFICATION"].add(ts2 - ts1, len(json_data))
@@ -115,7 +132,7 @@ def udpthread():
 
             if method == 'connect':
                 if src not in DeviceData:
-                    print("????????????????????????????")
+                    print("Connect new device ", src)
                     DeviceData[src] = Device(src)
                 DeviceData[src].addr = address
                 DeviceData[src].receive_keyword.add(keyword)
@@ -164,6 +181,8 @@ def udpthread():
 ##################################################
 app = Flask(__name__)
 
+
+
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
     src = request.args.get('src')
@@ -180,7 +199,7 @@ def Disconnect():
 
 @app.route("/Connect", methods=['POST'])
 def Connect():
-
+    CurrTime = time.time()
     data = ujson.loads(request.data)
     Tempkeywords = data['keyword'].split(',')
     type1 = data['type1'] #server, device
@@ -200,6 +219,7 @@ def Connect():
 
     ####Update Sending Keyword
     for keyword in Tempkeywords:
+        print(keyword)
         DeviceData[src].send_keyword.add(keyword)
         DeviceData[src].Sending[keyword] = 0
 
@@ -207,6 +227,7 @@ def Connect():
             Keywords.add(keyword)
             Data[keyword] = {}
             Data[keyword]["pair"] = type2
+            KeywordDatas[keyword] = KeywordData(keyword, type2)
         if keyword not in SchedulerData:
             SchedulerData[keyword] = Scheduler(keyword)
         SchedulerData[keyword].add_send_list(DeviceData[src])
@@ -241,7 +262,7 @@ def Connect():
     """
     ### update server capacity
 
-    return 'a'
+    return str(CurrTime)
 
 @app.route("/Store", methods=['POST'])
 def Store():
@@ -258,6 +279,20 @@ def Store():
             Data[keyword][src] = {}
         Data[keyword][src][id] = bytes(request.data)
         ts2 = time.time()
+        """
+        if keyword in KeywordDatas:
+            pair = KeywordDatas[keyword].pair
+            if pair is not None:
+                try:
+                    Data[pair][src][id]
+                except KeyError as e:
+                    print(e)
+                try:
+                    print('alread stored data', pair, src)
+                except Exception as e:
+                    print('Error', e)
+        """
+
         SendNotification(keyword, id, src, type2, ts)
         Data["TS"][keyword]["IN"].add(ts2-ts1, len(Data[keyword][src][id]))
     return 'a'#str(id1).encode()
@@ -273,7 +308,7 @@ def Load():
         #while Data[keyword][src].get(id) is None:
         #    print("empty key!!")
         ts2 = time.time()
-        Data["TS"][keyword]["OUT"].add(ts2 - ts1, len(Data[keyword][src][id]))
+        #Data["TS"][keyword]["OUT"].add(ts2 - ts1, len(Data[keyword][src][id]))
         return (Data[keyword][src][id]) #bytes
     return ''
 ###########################################################################################################################
@@ -290,10 +325,14 @@ signal.signal(signal.SIGINT, handler)
 
 if __name__ == "__main__":
     ##################################################
+    c = ntplib.NTPClient()
+    response = c.request('europe.pool.ntp.org', version=3)
+    ServerTime = time.time()#-response.tx_time
+    print('diff', ServerTime)
     ##arguments
     parser = argparse.ArgumentParser(
         description='WISE UI Web Server',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+          formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         '--ip', type=str, default='0.0.0.0',
         help='ip address')
@@ -348,6 +387,7 @@ if __name__ == "__main__":
 
     DeviceData={}
     SchedulerData={}
+    KeywordDatas = {}
     Data = {}
     try:
         path = os.path.dirname(os.path.realpath(__file__))
