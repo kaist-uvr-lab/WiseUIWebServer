@@ -14,7 +14,8 @@ class Device:
         if self.type == 'device':
             return 0
 
-        nSkip = int(Total / self.capacity) + 1
+        #nSkip = int(Total / self.capacity) + 1
+        nSkip = 1
         if nSkip == 1:
             self.bSchedule = False
             nSkip = 0

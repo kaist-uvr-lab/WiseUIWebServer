@@ -64,41 +64,36 @@ def saveProcessingTime():
 keyboard.add_hotkey("ctrl+p",lambda: printProcessingTime())
 keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
 
-def SendNotification(keyword, id, src, type2, ts):
+from datetime import datetime
+def SendNotification(keyword, id, src, type2, length,ts):
     try:
         if keyword in SchedulerData:
+
+            #if 'client_' in src and keyword == 'ReferenceFrame':
+            #    print("test = ",src,datetime.now())
+
             ts1 = time.time()
-            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'src': src})
+            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'length':length , 'src': src})
             for key in SchedulerData[keyword].broadcast_list.keys():
 
                 bSend = True
                 desc = SchedulerData[keyword].broadcast_list[key]
 
-                if keyword == "ResTask1":
-                    print('123123123', bSend, desc.bSchedule, src, keyword, key, desc.name)
-                    print(DeviceData[src].Sending)
-                    print(DeviceData[src].Skipping)
-
                 if desc.bSchedule:
-                    print('error case???')
-                    print('skiping',DeviceData[src].Skipping[desc.name])
-                    print('sending',DeviceData[src].Sending[keyword])
+                    #print('error case???')
+                    #print('skiping',DeviceData[src].Skipping[desc.name])
+                    #print('sending',DeviceData[src].Sending[keyword])
                     DeviceData[src].Sending[keyword] += 1
-                    if DeviceData[src].Sending[keyword] % DeviceData[src].Skipping[desc.name] != 0:
-                        bSend = False
-                    if keyword == "ResTask1":
-                        print('sc????')
-                    print("Scheduling = ", src, key, DeviceData[src].Sending[keyword],
-                              DeviceData[src].Skipping[desc.name], bSend)
+                    #if DeviceData[src].Sending[keyword] % DeviceData[src].Skipping[desc.name] != 0:
+                    #    bSend = False
+
+                    #print("Scheduling = ", src, key, DeviceData[src].Sending[keyword],DeviceData[src].Skipping[desc.name], bSend)
+
                 if bSend:
-                    if keyword == "ResTask1":
-                        print('send success')
                     UDPServerSocket.sendto(json_data.encode(), desc.addr)
 
             if src in SchedulerData[keyword].unicast_list.keys():
-                if keyword == "ResTask1":
-                    print('sending success')
-                UDPServerSocket.sendto(json_data.encode(), SchedulerData[keyword].unicast_list[src].addr)
+                nres = UDPServerSocket.sendto(json_data.encode(), SchedulerData[keyword].unicast_list[src].addr)
             ts2 = time.time()
             Data["TS"][keyword]["NOTIFICATION"].add(ts2 - ts1, len(json_data))
     except KeyError:
@@ -125,6 +120,8 @@ def udpthread():
             keyword = data['keyword']
             src = data['src']
 
+            print(data)
+
             if not data.get('ts'):
                 sts = 0.0
             else:
@@ -136,9 +133,10 @@ def udpthread():
                     DeviceData[src] = Device(src)
                 DeviceData[src].addr = address
                 DeviceData[src].receive_keyword.add(keyword)
+
                 if keyword not in SchedulerData:
                     SchedulerData[keyword]=Scheduler(keyword)
-
+                print('udpthread',src,keyword,address)
                 multi = data['type2']
                 SchedulerData[keyword].add_receive_list(DeviceData[src], multi)
                 """
@@ -153,6 +151,7 @@ def udpthread():
             elif method == 'disconnect':
                 multi = data['type2']
                 SchedulerData[keyword].remove_receive_list(DeviceData[src], multi)
+
                 """
                 if multi == 'single':
                     KeywordAddrLists[keyword].pop(src)
@@ -181,8 +180,6 @@ def udpthread():
 ##################################################
 app = Flask(__name__)
 
-
-
 @app.route("/Disconnect", methods=['POST'])
 def Disconnect():
     src = request.args.get('src')
@@ -205,7 +202,7 @@ def Connect():
     type1 = data['type1'] #server, device
     type2 = data['type2']
     src = data['src']
-
+    print(src)
     if src not in DeviceData:
         DeviceData[src] = Device(src)
     try:
@@ -238,30 +235,6 @@ def Connect():
             Data["TS"][keyword]["OUT"] = ProcessingTime()
             Data["TS"][keyword]["NOTIFICATION"] = ProcessingTime()
 
-        #print("S1 = ", keyword, len(SchedulerData[keyword].send_list), len(SchedulerData[keyword].receive_list))
-    ####Update Sending Keyword
-
-    ####Update Capacity
-    """
-    temp = {}
-    temp['capacity'] = capacity
-    if type1 == 'server':
-        if capacity > 0 and Data['device_capacity'] >= capacity:
-            temp['schedule'] = True
-        else:
-            temp['schedule'] = False
-        for device in Data['device'].keys():
-            print(device)
-    if type1 == 'device':
-        temp['queue'] = {}
-        Data['device_capacity'] = Data['device_capacity'] + capacity
-        for server in Data['server'].keys():
-            print(server)
-    Data[type1][src] = temp
-    print("Device = ", len(Data['device']), ",Server = ", len(Data['server']))
-    """
-    ### update server capacity
-
     return str(CurrTime)
 
 @app.route("/Store", methods=['POST'])
@@ -277,24 +250,12 @@ def Store():
     if keyword in Keywords:
         if Data[keyword].get(src) is None:
             Data[keyword][src] = {}
-        Data[keyword][src][id] = bytes(request.data)
+        rdata = bytes(request.data);
+        Data[keyword][src][id] = rdata;
         ts2 = time.time()
-        """
-        if keyword in KeywordDatas:
-            pair = KeywordDatas[keyword].pair
-            if pair is not None:
-                try:
-                    Data[pair][src][id]
-                except KeyError as e:
-                    print(e)
-                try:
-                    print('alread stored data', pair, src)
-                except Exception as e:
-                    print('Error', e)
-        """
+        SendNotification(keyword, id, src, type2, len(rdata), ts)
+        Data["TS"][keyword]["IN"].add(ts2 - ts1, len(Data[keyword][src][id]))
 
-        SendNotification(keyword, id, src, type2, ts)
-        Data["TS"][keyword]["IN"].add(ts2-ts1, len(Data[keyword][src][id]))
     return 'a'#str(id1).encode()
 
 @app.route("/Load", methods=['POST'])
@@ -340,50 +301,7 @@ if __name__ == "__main__":
         '--port', type=int, default=35005,
         help='port number')
 
-    parser.add_argument(
-        '--CONTENT_IP', type=str, default='0.0.0.0',
-        help='ip address')
-    parser.add_argument(
-        '--CONTENT_PORT', type=int, default=35001,
-        help='port number')
-    """
-    parser.add_argument(
-        '--SLAM_SERVER', type=str,
-        help='http://xxx.xxx.xxx.xxx:xxxx')
-
-    parser.add_argument(
-        '--DEPTH_SERVER', type=str,
-        help='http://xxx.xxx.xxx.xxx:xxxx')
-
-    parser.add_argument(
-    '--SEGMENTATION_SERVER', type=str,
-        help='http://xxx.xxx.xxx.xxx:xxxx')
-
-    parser.add_argument(
-        '--MAP', type=str,
-        help='load map name')
-    """
     opt = parser.parse_args()
-
-    """
-    device0 = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-    # device3 = torch.device("cuda:3") if torch.cuda.is_available() else torch.device("cpu")
-
-    # matching=[]
-    # for i in range(NUM_MAX_MATCH):
-    #    matching.append(Matching(config).eval().to(device0))
-
-    # flann based matcher
-
-    FLANN_INDEX_KDTREE = 0
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-    search_params = dict(checks=50)  # or pass empty dictionary
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
-    bf = cv2.BFMatcher()  #
-    """
-
-    # UserData = {}
-    # MapData = {}
 
     DeviceData={}
     SchedulerData={}
@@ -396,10 +314,6 @@ if __name__ == "__main__":
         f.close()
     except FileNotFoundError:
         Data["TS"] = {}
-    #SERVER, DEVICE CAPACITY for scheduler
-    #Data['server']={}
-    #Data['device']={}
-    #Data['device_capacity'] = 0
 
     Keywords = set()
     nKeywordID = 0
