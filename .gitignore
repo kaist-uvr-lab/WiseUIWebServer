@@ -3,3 +3,5 @@ evaluation/
 module/__pycache__
 superglue/__pycache__
 map/
+db/
+*.pt

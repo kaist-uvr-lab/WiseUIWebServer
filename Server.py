@@ -5,17 +5,16 @@ import ujson
 import time
 import numpy as np
 from flask import Flask, request
-import requests
-from flask_cors import CORS
-import base64
-import cv2
+#import requests
+#from flask_cors import CORS
+#import base64
 
-import datetime
+#import datetime
 import argparse
-import torch
+#import torch
 import os
-import keyboard
-import ntplib
+#import keyboard
+#import ntplib
 
 ##import super glue and super point
 ##################################################
@@ -34,9 +33,9 @@ from socket import *
 
 ####WSGI
 from multiprocessing.pool import Pool
-import gevent
+#import gevent
 from gevent.pywsgi import WSGIServer
-from gevent import monkey
+#from gevent import monkey
 
 def printProcessingTime():
     keys = Data["TS"].keys()
@@ -61,11 +60,11 @@ def saveProcessingTime():
         t3.update()
     pickle.dump(Data["TS"], open(path+'/evaluation/processing_time.bin', "wb"))
 
-keyboard.add_hotkey("ctrl+p",lambda: printProcessingTime())
-keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
+#keyboard.add_hotkey("ctrl+p",lambda: printProcessingTime())
+#keyboard.add_hotkey("ctrl+s",lambda: saveProcessingTime())
 
 from datetime import datetime
-def SendNotification(keyword, id, src, type2, length,ts):
+def SendNotification(keyword, id, src, type2, length,ts,ts2):
     try:
         if keyword in SchedulerData:
 
@@ -73,7 +72,7 @@ def SendNotification(keyword, id, src, type2, length,ts):
             #    print("test = ",src,datetime.now())
 
             ts1 = time.time()
-            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'length':length , 'src': src})
+            json_data = ujson.dumps({'keyword': keyword, 'type1': 'notification', 'type2': type2, 'id': id, 'ts': ts, 'ts2':ts2, 'length':length , 'src': src})
             for key in SchedulerData[keyword].broadcast_list.keys():
 
                 bSend = True
@@ -90,12 +89,14 @@ def SendNotification(keyword, id, src, type2, length,ts):
                     #print("Scheduling = ", src, key, DeviceData[src].Sending[keyword],DeviceData[src].Skipping[desc.name], bSend)
 
                 if bSend:
+                    #print(json_data)
                     UDPServerSocket.sendto(json_data.encode(), desc.addr)
 
             if src in SchedulerData[keyword].unicast_list.keys():
+                #print(json_data)
                 nres = UDPServerSocket.sendto(json_data.encode(), SchedulerData[keyword].unicast_list[src].addr)
-            ts2 = time.time()
-            Data["TS"][keyword]["NOTIFICATION"].add(ts2 - ts1, len(json_data))
+            tsend = time.time()
+            Data["TS"][keyword]["NOTIFICATION"].add(tsend - ts1, len(json_data))
     except KeyError:
         pass
     except ConnectionResetError:
@@ -191,12 +192,11 @@ def Disconnect():
         #print(DeviceData[src].send_keyword)
 
     #if type == 'device' and src in Data['device']:
-    #    Data['device_capacity'] = Data['device_capacity'] - Data['device'][src]['capacity']
-    return ''
-
+    #    Data['device_capacity'] = Data['device_capacity'] - Data['device'][src]['cap
 @app.route("/Connect", methods=['POST'])
 def Connect():
     CurrTime = time.time()
+    print("asdf",request.data)
     data = ujson.loads(request.data)
     Tempkeywords = data['keyword'].split(',')
     type1 = data['type1'] #server, device
@@ -237,14 +237,46 @@ def Connect():
 
     return str(CurrTime)
 
-@app.route("/Store", methods=['POST'])
-def Store():
+
+
+
+@app.route("/Save", methods=['POST'])
+def Save():
+    keyword = request.args.get('keyword')
+    src = request.args.get('src')
+    tmp = sorted(Data[keyword][src].items())
+    Data[keyword][src] = dict((id,val) for id, val in tmp)
+    pickle.dump(Data[keyword][src], open(path + '/db/'+keyword+'_'+src+'.bin', "wb"))
+    return 'a'
+
+@app.route("/Load", methods=['POST'])
+def Load():
+    keyword = request.args.get('keyword')
+    src = request.args.get('src')
+    path = os.path.dirname(os.path.realpath(__file__))
+    f = open(path + '/db/'+keyword+'_'+src+'.bin', 'rb')
+    if Data.get(keyword) is None:
+        Data[keyword] = {}
+    Data[keyword][src] = pickle.load(f)
+    f.close()
+    return 'a'
+@app.route("/Get", methods=['POST'])
+def Get():
+    keyword = request.args.get('keyword')
+    id = int(request.args.get('id',0))
+    src = request.args.get('src')
+    temp = list(Data[keyword][src].keys())
+    keys = np.array(temp,dtype = np.uint32)
+    return keys.tobytes()
+@app.route("/Upload", methods=['POST'])
+def Upload():
     # ts
     ts1 = time.time()
     keyword = request.args.get('keyword')
     id = int(request.args.get('id'))
     src = request.args.get('src')
     ts = request.args.get('ts', '0.0')
+    ts2 = request.args.get('ts2', '0.0')
     type2 = request.args.get('type2','None')
 
     if keyword in Keywords:
@@ -252,14 +284,14 @@ def Store():
             Data[keyword][src] = {}
         rdata = bytes(request.data);
         Data[keyword][src][id] = rdata;
-        ts2 = time.time()
-        SendNotification(keyword, id, src, type2, len(rdata), ts)
-        Data["TS"][keyword]["IN"].add(ts2 - ts1, len(Data[keyword][src][id]))
+        tsend = time.time()
+        SendNotification(keyword, id, src, type2, len(rdata), ts,ts2)
+        Data["TS"][keyword]["IN"].add(tsend - ts1, len(Data[keyword][src][id]))
 
     return 'a'#str(id1).encode()
 
-@app.route("/Load", methods=['POST'])
-def Load():
+@app.route("/Download", methods=['POST'])
+def Download():
     ts1 = time.time()
     keyword = request.args.get('keyword')
     id = int(request.args.get('id'))
@@ -286,8 +318,8 @@ signal.signal(signal.SIGINT, handler)
 
 if __name__ == "__main__":
     ##################################################
-    c = ntplib.NTPClient()
-    response = c.request('europe.pool.ntp.org', version=3)
+    #c = ntplib.NTPClient()
+    #response = c.request('europe.pool.ntp.org', version=3)
     ServerTime = time.time()#-response.tx_time
     print('diff', ServerTime)
     ##arguments
