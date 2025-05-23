@@ -1,7 +1,7 @@
-#Installation
+# Installation
 pip install usjon flask
 
-##run
+## run
 python Server.py --ip ipaddress --port port_number
 
 ## Acknowledgement
